@@ -126,6 +126,15 @@ def _clue_holds(
     row, col = parse_cell_id(cell_id)
     clue_type = structured.get("type")
 
+    if clue_type == "all":
+        for clause in structured.get("clauses", []):
+            result = _clue_holds(clause, person_id, cell_id, puzzle, solution)
+            if clause.get("negate"):
+                result = not result
+            if not result:
+                return False
+        return True
+
     if clue_type == "area":
         return cell.area == structured.get("area")
 
@@ -210,6 +219,34 @@ def _clue_holds(
             return others_have_it
 
         raise ValueError(f"unsupported relational_attribute relation: {relation!r}")
+
+    if clue_type == "relative_to_person":
+        reference_id = structured.get("reference")
+        direction = structured.get("direction")
+
+        reference_cell_id = solution.get(reference_id)
+        if reference_cell_id is None:
+            return False
+        reference_row, _ = parse_cell_id(reference_cell_id)
+
+        if direction == "south":
+            return row > reference_row
+
+        raise ValueError(f"unsupported relative_to_person direction: {direction!r}")
+
+    if clue_type == "unique_object_on":
+        target_object = structured.get("object")
+        if target_object not in cell.objects:
+            return False
+
+        for other_id, other_cell_id in solution.items():
+            if other_id == person_id:
+                continue
+            other_cell = puzzle.cells.get(other_cell_id)
+            if other_cell is not None and target_object in other_cell.objects:
+                return False
+
+        return True
 
     raise ValueError(f"unsupported clue type: {clue_type!r}")
 

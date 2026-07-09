@@ -581,3 +581,167 @@ def test_unsupported_relational_attribute_relation_raises():
     solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
     with pytest.raises(ValueError):
         check_clues_satisfied(puzzle, solution)
+
+
+def _puzzle_for_relative_position_tests(brigitte_structured: dict) -> Puzzle:
+    # grid 3x2, sin salas (no hacen falta para este tipo). Cameron fija en r0c0.
+    cells = {
+        f"r{row}c{col}": Cell(area=None) for row in range(3) for col in range(2)
+    }
+    return Puzzle(
+        id="book_club_relative_01",
+        scenario="El club de lectura",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=2),
+        areas={},
+        cells=cells,
+        people=[
+            Person(id="Cameron", role="suspect", clue=Clue(text="...")),
+            Person(
+                id="Brigitte",
+                role="suspect",
+                clue=Clue(text="...", structured=brigitte_structured),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"},
+    )
+
+
+def test_no_violation_when_south_of_reference_in_a_different_column():
+    structured = {"type": "relative_to_person", "reference": "Cameron", "direction": "south"}
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    # Brigitte en r1c1: fila mayor que Cameron (r0), columna distinta.
+    solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_same_row_as_reference():
+    structured = {"type": "relative_to_person", "reference": "Cameron", "direction": "south"}
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    solution = {"Cameron": "r0c0", "Brigitte": "r0c1", "Vlad": "r2c0"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Brigitte's clue is not satisfied" in violations[0]
+
+
+def test_unsupported_relative_to_person_direction_raises():
+    structured = {"type": "relative_to_person", "reference": "Cameron", "direction": "north"}
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, solution)
+
+
+def _puzzle_for_unique_object_tests() -> Puzzle:
+    # r0c0 y r0c1 tienen "silla"; r0c2 no tiene nada.
+    # r0c0 y r0c1 tienen "silla"; r0c2 y r0c3 no tienen nada. 3 personas,
+    # 4 celdas: asi "solo Darlene en una silla" es posible de verdad.
+    return Puzzle(
+        id="book_club_unique_01",
+        scenario="El club de lectura",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=4),
+        areas={},
+        cells={
+            "r0c0": Cell(area=None, objects=["silla"]),
+            "r0c1": Cell(area=None, objects=["silla"]),
+            "r0c2": Cell(area=None, objects=[]),
+            "r0c3": Cell(area=None, objects=[]),
+        },
+        people=[
+            Person(
+                id="Darlene",
+                role="suspect",
+                clue=Clue(
+                    text="Era la unica persona sentada en una silla.",
+                    structured={"type": "unique_object_on", "object": "silla"},
+                ),
+            ),
+            Person(id="Other", role="suspect", clue=Clue(text="...")),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Darlene": "r0c0", "Other": "r0c2", "Vlad": "r0c3"},
+    )
+
+
+def test_no_violation_when_only_darlene_is_on_a_chair():
+    puzzle = _puzzle_for_unique_object_tests()
+    solution = {"Darlene": "r0c0", "Other": "r0c2", "Vlad": "r0c3"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_someone_else_is_also_on_a_chair():
+    puzzle = _puzzle_for_unique_object_tests()
+    solution = {"Darlene": "r0c0", "Other": "r0c1", "Vlad": "r0c3"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Darlene's clue is not satisfied" in violations[0]
+
+
+def test_violation_when_darlene_herself_is_not_on_a_chair():
+    puzzle = _puzzle_for_unique_object_tests()
+    solution = {"Darlene": "r0c2", "Other": "r0c3", "Vlad": "r0c0"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Darlene's clue is not satisfied" in violations[0]
+
+
+def _puzzle_for_compound_clue_tests() -> Puzzle:
+    # BIBLIOTECA: r0c0(sin obj), r0c1(estanteria), r0c2(sin obj, junto al
+    # estante), r0c3(sin obj, NO junto al estante). OTHER: r0c4.
+    edison_structured = {
+        "type": "all",
+        "clauses": [
+            {"type": "area", "area": "BIBLIOTECA"},
+            {"type": "object_adjacent", "object": "estanteria", "negate": True},
+        ],
+    }
+    return Puzzle(
+        id="book_club_compound_01",
+        scenario="El club de lectura",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=5),
+        areas={
+            "BIBLIOTECA": ["r0c0", "r0c1", "r0c2", "r0c3"],
+            "OTHER": ["r0c4"],
+        },
+        cells={
+            "r0c0": Cell(area="BIBLIOTECA"),
+            "r0c1": Cell(area="BIBLIOTECA", objects=["estanteria"]),
+            "r0c2": Cell(area="BIBLIOTECA"),
+            "r0c3": Cell(area="BIBLIOTECA"),
+            "r0c4": Cell(area="OTHER"),
+        },
+        people=[
+            Person(
+                id="Edison",
+                role="suspect",
+                clue=Clue(text="...", structured=edison_structured),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Edison": "r0c3", "Vlad": "r0c4"},
+    )
+
+
+def test_no_violation_when_in_library_and_not_beside_the_shelf():
+    puzzle = _puzzle_for_compound_clue_tests()
+    solution = {"Edison": "r0c3", "Vlad": "r0c4"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_in_library_but_beside_the_shelf():
+    puzzle = _puzzle_for_compound_clue_tests()
+    solution = {"Edison": "r0c2", "Vlad": "r0c4"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Edison's clue is not satisfied" in violations[0]
+
+
+def test_violation_when_not_even_in_the_library():
+    puzzle = _puzzle_for_compound_clue_tests()
+    solution = {"Edison": "r0c4", "Vlad": "r0c3"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Edison's clue is not satisfied" in violations[0]
