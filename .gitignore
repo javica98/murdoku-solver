@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Puzzles oficiales transcritos a mano: solo para validacion local,
+# nunca se suben a un repo publico (ver roadmap, seccion 3).
+puzzles/local/
