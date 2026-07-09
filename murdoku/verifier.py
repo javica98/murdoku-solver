@@ -1,6 +1,7 @@
 import re
+from typing import Any
 
-from murdoku.schema import Puzzle
+from murdoku.schema import Cell, Puzzle
 
 _CELL_ID_RE = re.compile(r"^r(\d+)c(\d+)$")
 
@@ -85,3 +86,69 @@ def identify_murderer(puzzle: Puzzle, solution: dict[str, str]) -> str | None:
     if len(suspects_with_victim) == 1:
         return suspects_with_victim[0]
     return None
+
+
+def _area_bounding_box(puzzle: Puzzle, area: str) -> tuple[int, int, int, int]:
+    """Fila/columna minima y maxima de las celdas que pertenecen a `area`.
+
+    Asume que la sala es mas o menos rectangular. Si tiene forma de L,
+    esto puede marcar como "esquina" alguna celda que visualmente no lo es.
+    """
+    rows = []
+    cols = []
+    for cell_id, area_cell in puzzle.cells.items():
+        if area_cell.area == area:
+            r, c = parse_cell_id(cell_id)
+            rows.append(r)
+            cols.append(c)
+    return min(rows), max(rows), min(cols), max(cols)
+
+
+def _clue_holds(structured: dict[str, Any], cell: Cell, row: int, col: int, puzzle: Puzzle) -> bool:
+    clue_type = structured.get("type")
+
+    if clue_type == "area":
+        return cell.area == structured.get("area")
+
+    if clue_type == "object_on":
+        return structured.get("object") in cell.objects
+
+    if clue_type == "absolute_position":
+        position = structured.get("position")
+
+        if cell.area is None:
+            return False
+
+        min_row, max_row, min_col, max_col = _area_bounding_box(puzzle, cell.area)
+
+        if position == "corner":
+            is_edge_row = row in (min_row, max_row)
+            is_edge_col = col in (min_col, max_col)
+            return is_edge_row and is_edge_col
+
+        if position == "last_column":
+            return col == max_col
+
+        raise ValueError(f"unsupported absolute_position value: {position!r}")
+
+    raise ValueError(f"unsupported clue type: {clue_type!r}")
+
+
+def check_clues_satisfied(puzzle: Puzzle, solution: dict[str, str]) -> list[str]:
+    violations: list[str] = []
+
+    for person in puzzle.people:
+        if person.clue is None or person.clue.structured is None:
+            continue
+
+        cell_id = solution.get(person.id)
+        cell = puzzle.cells.get(cell_id) if cell_id is not None else None
+        if cell is None:
+            violations.append(f"{person.id} has no valid placement to check their clue")
+            continue
+
+        row, col = parse_cell_id(cell_id)
+        if not _clue_holds(person.clue.structured, cell, row, col, puzzle):
+            violations.append(f"{person.id}'s clue is not satisfied at {cell_id}")
+
+    return violations
