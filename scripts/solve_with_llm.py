@@ -15,10 +15,17 @@ SYSTEM_PROMPT = """Eres un detective resolviendo un puzzle de logica tipo sudoku
 
 Reglas del juego:
 - Cada persona (sospechosos + victima) ocupa una celda distinta del tablero.
-- Ninguna fila ni columna puede tener mas de una persona.
-- Las celdas bloqueadas no pueden ocuparse.
+- Cada fila y columna puede tener como maximo una persona (sospechoso o
+  victima).
+- Cada celda tiene un campo "blocked". Las celdas con "blocked": true NO se
+  pueden ocupar bajo ninguna circunstancia, aunque parezcan encajar con una
+  pista. Objetos como estanterias, mesas o plantas normalmente bloquean la
+  celda (nadie puede estar de pie sobre ellos); alfombras y sillas no.
 - Cada sospechoso tiene una pista en texto que describe donde estaba.
 - Debes cumplir TODAS las pistas a la vez.
+- Antes de dar tu respuesta final, revisa DOS VECES tu propia respuesta: (1)
+  que ninguna fila ni columna se repita entre las personas elegidas, y (2)
+  que ninguna celda elegida tenga "blocked": true.
 
 Devuelve UNICAMENTE un JSON con este formato, sin explicacion adicional:
 {"Nombre1": "rXcY", "Nombre2": "rXcY", ...}
@@ -47,6 +54,7 @@ def main(path: str, model: str) -> None:
     client = OpenAI()
     response = client.responses.create(
         model=model,
+        reasoning={"effort": "high"},
         input=[
             {"type": "message", "role": "developer", "content": SYSTEM_PROMPT},
             {
