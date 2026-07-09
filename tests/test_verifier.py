@@ -745,3 +745,78 @@ def test_violation_when_not_even_in_the_library():
     violations = check_clues_satisfied(puzzle, solution)
     assert len(violations) == 1
     assert "Edison's clue is not satisfied" in violations[0]
+
+
+def _puzzle_for_any_and_with_person_tests(diana_structured: dict, aaron_structured: dict) -> Puzzle:
+    # 1x4: r0c0/r0c1 = DORMITORIO, r0c2 = PORCHE, r0c3 = COCINA.
+    return Puzzle(
+        id="backyard_any_01",
+        scenario="El jardin trasero",
+        difficulty="medium",
+        grid=Grid(rows=1, cols=4),
+        areas={
+            "DORMITORIO": ["r0c0", "r0c1"],
+            "PORCHE": ["r0c2"],
+            "COCINA": ["r0c3"],
+        },
+        cells={
+            "r0c0": Cell(area="DORMITORIO"),
+            "r0c1": Cell(area="DORMITORIO"),
+            "r0c2": Cell(area="PORCHE"),
+            "r0c3": Cell(area="COCINA"),
+        },
+        people=[
+            Person(id="Diana", role="suspect", clue=Clue(text="...", structured=diana_structured)),
+            Person(id="Aaron", role="suspect", clue=Clue(text="...", structured=aaron_structured)),
+            Person(id="Elena", role="suspect", clue=Clue(text="...")),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Diana": "r0c0", "Aaron": "r0c1", "Elena": "r0c2", "Vlad": "r0c3"},
+    )
+
+
+_ANY_CLAUSES = {
+    "type": "any",
+    "clauses": [
+        {"type": "area", "area": "DORMITORIO"},
+        {"type": "area", "area": "PORCHE"},
+    ],
+}
+_WITH_PERSON_CLAUSE = {"type": "with_person", "reference": "Elena"}
+
+
+def test_any_is_satisfied_by_the_first_clause():
+    puzzle = _puzzle_for_any_and_with_person_tests(_ANY_CLAUSES, _WITH_PERSON_CLAUSE)
+    # Diana en DORMITORIO (r0c0): cumple la primera clausula del "any".
+    solution = {"Diana": "r0c0", "Aaron": "r0c1", "Elena": "r0c2", "Vlad": "r0c3"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert not any("Diana's clue is not satisfied" in v for v in violations)
+
+
+def test_any_is_satisfied_by_the_second_clause():
+    puzzle = _puzzle_for_any_and_with_person_tests(_ANY_CLAUSES, _WITH_PERSON_CLAUSE)
+    # Diana en PORCHE (r0c2): cumple la segunda clausula del "any".
+    solution = {"Diana": "r0c2", "Aaron": "r0c0", "Elena": "r0c1", "Vlad": "r0c3"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert not any("Diana's clue is not satisfied" in v for v in violations)
+
+
+def test_any_fails_when_neither_clause_holds():
+    puzzle = _puzzle_for_any_and_with_person_tests(_ANY_CLAUSES, _WITH_PERSON_CLAUSE)
+    solution = {"Diana": "r0c3", "Aaron": "r0c0", "Elena": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert any("Diana's clue is not satisfied" in v for v in violations)
+
+
+def test_with_person_holds_when_same_area_as_reference():
+    puzzle = _puzzle_for_any_and_with_person_tests(_ANY_CLAUSES, _WITH_PERSON_CLAUSE)
+    solution = {"Diana": "r0c3", "Aaron": "r0c0", "Elena": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert not any("Aaron's clue is not satisfied" in v for v in violations)
+
+
+def test_with_person_fails_when_different_area_from_reference():
+    puzzle = _puzzle_for_any_and_with_person_tests(_ANY_CLAUSES, _WITH_PERSON_CLAUSE)
+    solution = {"Diana": "r0c0", "Aaron": "r0c3", "Elena": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert any("Aaron's clue is not satisfied" in v for v in violations)

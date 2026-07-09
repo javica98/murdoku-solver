@@ -93,6 +93,13 @@ def test_puzzle_with_valid_cell_ids_is_accepted():
     assert puzzle.solution["Bastian"] == "r0c0"
 
 
+def test_puzzle_without_solution_is_accepted():
+    kwargs = _minimal_puzzle_kwargs()
+    del kwargs["solution"]
+    puzzle = Puzzle(**kwargs)
+    assert puzzle.solution is None
+
+
 def test_puzzle_rejects_malformed_cell_id_in_cells():
     kwargs = _minimal_puzzle_kwargs()
     kwargs["cells"] = {"A1": Cell(area="CELL_A")}

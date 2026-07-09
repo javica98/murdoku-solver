@@ -45,4 +45,7 @@ class Puzzle(BaseModel):
     areas: dict[str, list[CellId]]
     cells: dict[CellId, Cell]
     people: list[Person]
-    solution: dict[str, CellId]
+    # None cuando el puzzle se transcribe sin resolver todavia (p.ej. para
+    # que lo resuelva un LLM); el verificador compara una solucion
+    # propuesta aparte, no depende de este campo.
+    solution: dict[str, CellId] | None = None

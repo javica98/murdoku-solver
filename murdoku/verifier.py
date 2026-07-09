@@ -135,11 +135,30 @@ def _clue_holds(
                 return False
         return True
 
+    if clue_type == "any":
+        for clause in structured.get("clauses", []):
+            result = _clue_holds(clause, person_id, cell_id, puzzle, solution)
+            if clause.get("negate"):
+                result = not result
+            if result:
+                return True
+        return False
+
     if clue_type == "area":
         return cell.area == structured.get("area")
 
     if clue_type == "object_on":
         return structured.get("object") in cell.objects
+
+    if clue_type == "with_person":
+        reference_id = structured.get("reference")
+        reference_cell_id = solution.get(reference_id)
+        if reference_cell_id is None:
+            return False
+        reference_cell = puzzle.cells.get(reference_cell_id)
+        if reference_cell is None or reference_cell.area is None:
+            return False
+        return cell.area == reference_cell.area
 
     if clue_type == "absolute_position":
         position = structured.get("position")
