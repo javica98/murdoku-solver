@@ -315,3 +315,269 @@ def test_middle_of_the_room_is_not_a_corner_even_if_not_center_of_board():
     violations = check_clues_satisfied(puzzle, solution)
     assert len(violations) == 1
     assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def _puzzle_with_shelf_at_r0c1(bastian_cell_id: str) -> Puzzle:
+    # tablero 1x3, una sola sala. La estanteria esta en r0c1: r0c0 y r0c2
+    # son "beside" ella; r0c1 (la propia celda del estante) no lo es.
+    return Puzzle(
+        id="prison_mini_08",
+        scenario="Solitary Confinement",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=3),
+        areas={"ROOM": ["r0c0", "r0c1", "r0c2"]},
+        cells={
+            "r0c0": Cell(area="ROOM"),
+            "r0c1": Cell(area="ROOM", objects=["shelf"]),
+            "r0c2": Cell(area="ROOM"),
+        },
+        people=[
+            Person(
+                id="Bastian",
+                role="suspect",
+                clue=Clue(
+                    text="He was beside a shelf.",
+                    structured={"type": "object_adjacent", "object": "shelf"},
+                ),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": bastian_cell_id, "Vlad": "r0c2"},
+    )
+
+
+def test_no_violation_when_beside_the_shelf():
+    puzzle = _puzzle_with_shelf_at_r0c1("r0c0")
+    solution = {"Bastian": "r0c0", "Vlad": "r0c2"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_on_the_shelfs_own_cell_not_beside_it():
+    puzzle = _puzzle_with_shelf_at_r0c1("r0c1")
+    solution = {"Bastian": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def test_no_violation_when_adjacent_object_is_in_a_different_area():
+    # "beside" es solo geometria: no importa si el objeto vecino esta
+    # en otra sala.
+    puzzle = Puzzle(
+        id="prison_mini_09",
+        scenario="Solitary Confinement",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=2),
+        areas={"ROOM_A": ["r0c0"], "ROOM_B": ["r0c1"]},
+        cells={
+            "r0c0": Cell(area="ROOM_A"),
+            "r0c1": Cell(area="ROOM_B", objects=["shelf"]),
+        },
+        people=[
+            Person(
+                id="Bastian",
+                role="suspect",
+                clue=Clue(
+                    text="He was beside a shelf.",
+                    structured={"type": "object_adjacent", "object": "shelf"},
+                ),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": "r0c0", "Vlad": "r0c1"},
+    )
+    solution = {"Bastian": "r0c0", "Vlad": "r0c1"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def _puzzle_for_empty_neighbor_tests() -> Puzzle:
+    # 1x3: r0c0 solo tiene un vecino ortogonal posible, r0c1.
+    return Puzzle(
+        id="prison_mini_10",
+        scenario="Solitary Confinement",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=3),
+        areas={"ROOM": ["r0c0", "r0c1", "r0c2"]},
+        cells={
+            "r0c0": Cell(area="ROOM"),
+            "r0c1": Cell(area="ROOM"),
+            "r0c2": Cell(area="ROOM"),
+        },
+        people=[
+            Person(
+                id="Bastian",
+                role="suspect",
+                clue=Clue(
+                    text="There was an empty cell beside his.",
+                    structured={"type": "empty_neighbor"},
+                ),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": "r0c0", "Vlad": "r0c2"},
+    )
+
+
+def test_no_violation_when_a_neighbor_cell_is_empty():
+    puzzle = _puzzle_for_empty_neighbor_tests()
+    # r0c1 (el unico vecino de r0c0) esta vacio.
+    solution = {"Bastian": "r0c0", "Vlad": "r0c2"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_the_only_neighbor_is_occupied():
+    puzzle = _puzzle_for_empty_neighbor_tests()
+    # ahora Vlad ocupa el unico vecino de Bastian.
+    solution = {"Bastian": "r0c0", "Vlad": "r0c1"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def _puzzle_for_alone_tests() -> Puzzle:
+    # ROOM = r0c0,r0c1 (2 celdas). HALL = r0c2,r0c3 (2 celdas).
+    return Puzzle(
+        id="prison_mini_11",
+        scenario="Solitary Confinement",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=4),
+        areas={"ROOM": ["r0c0", "r0c1"], "HALL": ["r0c2", "r0c3"]},
+        cells={
+            "r0c0": Cell(area="ROOM"),
+            "r0c1": Cell(area="ROOM"),
+            "r0c2": Cell(area="HALL"),
+            "r0c3": Cell(area="HALL"),
+        },
+        people=[
+            Person(
+                id="Bastian",
+                role="suspect",
+                clue=Clue(
+                    text="He was alone in his cell.",
+                    structured={"type": "relational_person", "relation": "alone"},
+                ),
+            ),
+            Person(id="Elena", role="suspect", clue=Clue(text="...")),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": "r0c0", "Elena": "r0c2", "Vlad": "r0c3"},
+    )
+
+
+def test_no_violation_when_alone_in_own_area():
+    puzzle = _puzzle_for_alone_tests()
+    solution = {"Bastian": "r0c0", "Elena": "r0c2", "Vlad": "r0c3"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_not_alone_in_own_area():
+    puzzle = _puzzle_for_alone_tests()
+    # Elena se muda a ROOM, con Bastian.
+    solution = {"Bastian": "r0c0", "Elena": "r0c1", "Vlad": "r0c3"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def test_unsupported_relational_person_relation_raises():
+    puzzle = _puzzle_for_alone_tests()
+    puzzle.people[0].clue.structured = {"type": "relational_person", "relation": "married"}
+    solution = {"Bastian": "r0c0", "Elena": "r0c2", "Vlad": "r0c3"}
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, solution)
+
+
+def _puzzle_for_attribute_tests(structured: dict, roommate_attributes: dict) -> Puzzle:
+    # ROOM = r0c0 (Bastian), r0c1 (Roommate). HALL = r0c2 (Vlad).
+    return Puzzle(
+        id="prison_mini_12",
+        scenario="Solitary Confinement",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=3),
+        areas={"ROOM": ["r0c0", "r0c1"], "HALL": ["r0c2"]},
+        cells={
+            "r0c0": Cell(area="ROOM"),
+            "r0c1": Cell(area="ROOM"),
+            "r0c2": Cell(area="HALL"),
+        },
+        people=[
+            Person(
+                id="Bastian",
+                role="suspect",
+                clue=Clue(text="...", structured=structured),
+            ),
+            Person(
+                id="Roommate",
+                role="suspect",
+                clue=Clue(text="..."),
+                attributes=roommate_attributes,
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"},
+    )
+
+
+def test_no_violation_when_no_one_with_beard_in_room():
+    structured = {
+        "type": "relational_attribute",
+        "relation": "none_with",
+        "attribute": "beard",
+        "value": True,
+    }
+    puzzle = _puzzle_for_attribute_tests(structured, roommate_attributes={"beard": False})
+    solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_someone_with_beard_in_room():
+    structured = {
+        "type": "relational_attribute",
+        "relation": "none_with",
+        "attribute": "beard",
+        "value": True,
+    }
+    puzzle = _puzzle_for_attribute_tests(structured, roommate_attributes={"beard": True})
+    solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def test_no_violation_when_with_another_woman():
+    structured = {
+        "type": "relational_attribute",
+        "relation": "with_another",
+        "attribute": "gender",
+        "value": "female",
+    }
+    puzzle = _puzzle_for_attribute_tests(structured, roommate_attributes={"gender": "female"})
+    solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_violation_when_not_with_another_woman():
+    structured = {
+        "type": "relational_attribute",
+        "relation": "with_another",
+        "attribute": "gender",
+        "value": "female",
+    }
+    puzzle = _puzzle_for_attribute_tests(structured, roommate_attributes={"gender": "male"})
+    solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
+    violations = check_clues_satisfied(puzzle, solution)
+    assert len(violations) == 1
+    assert "Bastian's clue is not satisfied" in violations[0]
+
+
+def test_unsupported_relational_attribute_relation_raises():
+    structured = {
+        "type": "relational_attribute",
+        "relation": "same_zodiac_sign",
+        "attribute": "gender",
+        "value": "female",
+    }
+    puzzle = _puzzle_for_attribute_tests(structured, roommate_attributes={"gender": "female"})
+    solution = {"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"}
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, solution)

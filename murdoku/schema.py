@@ -23,6 +23,7 @@ class Person(BaseModel):
     id: str
     role: Literal["suspect", "victim"]
     clue: Clue | None = None
+    attributes: dict[str, Any] = {}
 
     @model_validator(mode="after")
     def suspect_requires_clue(self) -> "Person":

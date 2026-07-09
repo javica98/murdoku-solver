@@ -42,6 +42,21 @@ def test_victim_without_clue_is_valid():
     assert person.clue is None
 
 
+def test_person_attributes_default_to_empty_dict():
+    person = Person(id="Vlad", role="victim")
+    assert person.attributes == {}
+
+
+def test_person_attributes_can_be_set():
+    person = Person(
+        id="Bastian",
+        role="suspect",
+        clue=Clue(text="..."),
+        attributes={"gender": "male", "beard": True},
+    )
+    assert person.attributes == {"gender": "male", "beard": True}
+
+
 def test_suspect_without_clue_is_rejected():
     with pytest.raises(ValidationError):
         Person(id="Bastian", role="suspect")
