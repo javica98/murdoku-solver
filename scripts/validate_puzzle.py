@@ -10,12 +10,17 @@ from murdoku.verifier import (
 )
 
 
-def main(path: str) -> None:
+def main(path: str, solution_path: str | None = None) -> None:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     puzzle = Puzzle.model_validate(data)
-    solution = puzzle.solution
+
+    if solution_path is None:
+        solution = puzzle.solution
+    else:
+        with open(solution_path, encoding="utf-8") as f:
+            solution = json.load(f)
 
     violations = (
         check_unique_rows_and_cols(solution)
@@ -35,4 +40,4 @@ def main(path: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
