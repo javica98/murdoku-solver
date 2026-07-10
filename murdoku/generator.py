@@ -82,3 +82,68 @@ def generate_placement(
         person_id: f"r{row}c{col}"
         for row, (person_id, col) in enumerate(zip(shuffled_people, columns))
     }
+
+
+BLOCKING_OBJECTS = ["estanteria", "mesa", "planta"]
+NON_BLOCKING_OBJECTS = ["silla", "alfombra", "cama"]
+ALL_OBJECTS = BLOCKING_OBJECTS + NON_BLOCKING_OBJECTS
+
+
+def assign_clues_and_objects(
+    placement: dict[str, str],
+    cells: dict[str, Cell],
+    rows: int,
+    cols: int,
+    rng: random.Random | None = None,
+) -> tuple[dict[str, Cell], dict[str, dict]]:
+    """Para cada persona, elige un tipo de pista cierta segun su colocacion
+    y coloca los objetos que hagan falta para que lo sea.
+
+    Solo cubre los 3 tipos mas simples de la taxonomia (area, object_on,
+    object_adjacent); los relacionales (que dependen de donde esta el
+    resto de gente) se añaden en un paso posterior.
+
+    Devuelve una copia de `cells` con los objetos añadidos, y un dict
+    persona -> clue.structured.
+    """
+    if rng is None:
+        rng = random.Random()
+
+    cells = {cell_id: cell.model_copy(deep=True) for cell_id, cell in cells.items()}
+    occupied_cells = set(placement.values())
+    clues: dict[str, dict] = {}
+
+    for person_id, cell_id in placement.items():
+        cell = cells[cell_id]
+        clue_type = rng.choice(["area", "object_on", "object_adjacent"])
+
+        if clue_type == "area":
+            clues[person_id] = {"type": "area", "area": cell.area}
+            continue
+
+        if clue_type == "object_on":
+            obj = rng.choice(NON_BLOCKING_OBJECTS)
+            cell.objects.append(obj)
+            clues[person_id] = {"type": "object_on", "object": obj}
+            continue
+
+        # object_adjacent: solo en celdas vecinas libres, para no colocar
+        # un objeto bloqueante encima de otra persona.
+        free_neighbors = [
+            n
+            for n in _orthogonal_neighbor_ids(cell_id, rows, cols)
+            if n not in occupied_cells
+        ]
+        if not free_neighbors:
+            clues[person_id] = {"type": "area", "area": cell.area}
+            continue
+
+        neighbor_id = rng.choice(sorted(free_neighbors))
+        obj = rng.choice(ALL_OBJECTS)
+        neighbor = cells[neighbor_id]
+        neighbor.objects.append(obj)
+        if obj in BLOCKING_OBJECTS:
+            neighbor.blocked = True
+        clues[person_id] = {"type": "object_adjacent", "object": obj}
+
+    return cells, clues

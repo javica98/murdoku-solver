@@ -2,8 +2,19 @@ import random
 
 import pytest
 
-from murdoku.generator import generate_placement, generate_rooms
-from murdoku.verifier import check_unique_rows_and_cols, parse_cell_id
+from murdoku.generator import (
+    NON_BLOCKING_OBJECTS,
+    assign_clues_and_objects,
+    generate_placement,
+    generate_rooms,
+)
+from murdoku.schema import Clue, Grid, Person, Puzzle
+from murdoku.verifier import (
+    check_clues_satisfied,
+    check_no_blocked_cells,
+    check_unique_rows_and_cols,
+    parse_cell_id,
+)
 
 
 def _cells_by_area(cells: dict) -> dict:
@@ -103,3 +114,75 @@ def test_connectivity_holds_across_many_random_seeds(seed):
     cells = generate_rooms(7, 7, ["A", "B", "C", "D", "E"], rng=random.Random(seed))
     for area, cell_ids in _cells_by_area(cells).items():
         assert _is_connected(cell_ids), f"seed={seed}: area {area} disconnected"
+
+
+def _build_puzzle(rows: int, cols: int, cells: dict, placement: dict, clues: dict) -> Puzzle:
+    areas: dict = {}
+    for cell_id, cell in cells.items():
+        areas.setdefault(cell.area, []).append(cell_id)
+
+    return Puzzle(
+        id="generated_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=rows, cols=cols),
+        areas=areas,
+        cells=cells,
+        people=[
+            Person(id=pid, role="suspect", clue=Clue(text="...", structured=clues[pid]))
+            for pid in placement
+        ],
+    )
+
+
+def test_every_person_gets_a_clue():
+    rng = random.Random(5)
+    people = ["Ada", "Bruno", "Carmen", "Diana"]
+    placement = generate_placement(4, 4, people, rng=rng)
+    rooms = generate_rooms(4, 4, ["A", "B"], rng=rng)
+    _, clues = assign_clues_and_objects(placement, rooms, 4, 4, rng=rng)
+    assert set(clues.keys()) == set(people)
+
+
+def test_nobody_ends_up_placed_on_a_blocked_cell():
+    rng = random.Random(6)
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena"]
+    placement = generate_placement(5, 5, people, rng=rng)
+    rooms = generate_rooms(5, 5, ["A", "B", "C"], rng=rng)
+    cells, clues = assign_clues_and_objects(placement, rooms, 5, 5, rng=rng)
+    puzzle = _build_puzzle(5, 5, cells, placement, clues)
+    assert check_no_blocked_cells(puzzle, placement) == []
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_derived_clues_are_actually_true_according_to_our_own_verifier(seed):
+    rng = random.Random(seed)
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    cells, clues = assign_clues_and_objects(placement, rooms, 6, 6, rng=rng)
+    puzzle = _build_puzzle(6, 6, cells, placement, clues)
+
+    assert check_no_blocked_cells(puzzle, placement) == []
+    assert check_clues_satisfied(puzzle, placement) == []
+
+
+def test_object_on_clues_use_only_non_blocking_objects():
+    rng = random.Random(6)
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena"]
+    placement = generate_placement(5, 5, people, rng=rng)
+    rooms = generate_rooms(5, 5, ["A", "B", "C"], rng=rng)
+    _, clues = assign_clues_and_objects(placement, rooms, 5, 5, rng=rng)
+    for structured in clues.values():
+        if structured["type"] == "object_on":
+            assert structured["object"] in NON_BLOCKING_OBJECTS
+
+
+def test_assign_clues_is_reproducible_with_the_same_seed():
+    people = ["Ada", "Bruno", "Carmen", "Diana"]
+    placement = generate_placement(4, 4, people, rng=random.Random(8))
+    rooms = generate_rooms(4, 4, ["A", "B"], rng=random.Random(8))
+
+    _, clues_a = assign_clues_and_objects(placement, rooms, 4, 4, rng=random.Random(1))
+    _, clues_b = assign_clues_and_objects(placement, rooms, 4, 4, rng=random.Random(1))
+    assert clues_a == clues_b
