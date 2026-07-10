@@ -2,8 +2,33 @@ import random
 
 import pytest
 
-from murdoku.generator import generate_placement
+from murdoku.generator import generate_placement, generate_rooms
 from murdoku.verifier import check_unique_rows_and_cols, parse_cell_id
+
+
+def _cells_by_area(cells: dict) -> dict:
+    by_area: dict = {}
+    for cell_id, cell in cells.items():
+        by_area.setdefault(cell.area, set()).add(cell_id)
+    return by_area
+
+
+def _is_connected(cell_ids: set) -> bool:
+    """BFS: desde una celda cualquiera, ¿se llega a todas las demas
+    moviendose solo arriba/abajo/izquierda/derecha?"""
+    remaining = set(cell_ids)
+    start = next(iter(remaining))
+    visited = {start}
+    frontier = [start]
+    while frontier:
+        current = frontier.pop()
+        row, col = parse_cell_id(current)
+        for r, c in [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]:
+            neighbor = f"r{r}c{c}"
+            if neighbor in remaining and neighbor not in visited:
+                visited.add(neighbor)
+                frontier.append(neighbor)
+    return visited == remaining
 
 
 def test_placement_has_one_cell_per_person():
@@ -42,3 +67,39 @@ def test_rejects_non_square_grid():
 def test_rejects_wrong_number_of_people():
     with pytest.raises(ValueError):
         generate_placement(3, 3, ["Ada", "Bruno"])
+
+
+def test_rooms_cover_every_cell_exactly_once():
+    cells = generate_rooms(6, 6, ["A", "B", "C"], rng=random.Random(0))
+    assert set(cells.keys()) == {f"r{r}c{c}" for r in range(6) for c in range(6)}
+
+
+def test_rooms_use_exactly_the_given_area_names():
+    cells = generate_rooms(6, 6, ["A", "B", "C"], rng=random.Random(0))
+    assert {cell.area for cell in cells.values()} == {"A", "B", "C"}
+
+
+def test_each_room_is_a_single_connected_piece():
+    cells = generate_rooms(9, 9, ["A", "B", "C", "D"], rng=random.Random(7))
+    for area, cell_ids in _cells_by_area(cells).items():
+        assert _is_connected(cell_ids), f"area {area} is split into disconnected pieces"
+
+
+def test_rooms_are_reproducible_with_the_same_seed():
+    cells_a = generate_rooms(6, 6, ["A", "B"], rng=random.Random(99))
+    cells_b = generate_rooms(6, 6, ["A", "B"], rng=random.Random(99))
+    assert {k: v.area for k, v in cells_a.items()} == {k: v.area for k, v in cells_b.items()}
+
+
+def test_rooms_rejects_more_areas_than_cells():
+    with pytest.raises(ValueError):
+        generate_rooms(2, 2, ["A", "B", "C", "D", "E"])
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_connectivity_holds_across_many_random_seeds(seed):
+    # el flood fill depende del orden aleatorio de expansion; probamos
+    # muchas semillas distintas para tener confianza de que no es casualidad.
+    cells = generate_rooms(7, 7, ["A", "B", "C", "D", "E"], rng=random.Random(seed))
+    for area, cell_ids in _cells_by_area(cells).items():
+        assert _is_connected(cell_ids), f"seed={seed}: area {area} disconnected"
