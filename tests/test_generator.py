@@ -1,4 +1,5 @@
 import random
+from unittest.mock import Mock
 
 import pytest
 
@@ -7,6 +8,8 @@ from murdoku.generator import (
     assign_clues_and_objects,
     generate_placement,
     generate_rooms,
+    render_clue_template,
+    reword_with_llm,
 )
 from murdoku.schema import Clue, Grid, Person, Puzzle
 from murdoku.verifier import (
@@ -186,3 +189,40 @@ def test_assign_clues_is_reproducible_with_the_same_seed():
     _, clues_a = assign_clues_and_objects(placement, rooms, 4, 4, rng=random.Random(1))
     _, clues_b = assign_clues_and_objects(placement, rooms, 4, 4, rng=random.Random(1))
     assert clues_a == clues_b
+
+
+def test_render_clue_template_for_area():
+    text = render_clue_template({"type": "area", "area": "JARDIN"})
+    assert text == "Estaba en la sala JARDIN."
+
+
+def test_render_clue_template_for_object_on():
+    text = render_clue_template({"type": "object_on", "object": "silla"})
+    assert text == "Estaba sobre una silla."
+
+
+def test_render_clue_template_for_object_adjacent():
+    text = render_clue_template({"type": "object_adjacent", "object": "mesa"})
+    assert text == "Estaba junto a una mesa."
+
+
+def test_render_clue_template_rejects_unsupported_type():
+    with pytest.raises(ValueError):
+        render_clue_template({"type": "relational_person", "relation": "alone"})
+
+
+def test_reword_with_llm_returns_the_models_text_and_calls_the_right_model():
+    # "doble" (mock) del cliente de OpenAI: no llamamos a la API de verdad,
+    # solo comprobamos que nuestra funcion la usa correctamente.
+    fake_content = Mock(type="output_text", text="  Descansaba junto a una mesa.  ")
+    fake_message = Mock(type="message", content=[fake_content])
+    fake_response = Mock(output=[fake_message])
+    fake_client = Mock()
+    fake_client.responses.create.return_value = fake_response
+
+    result = reword_with_llm("Estaba junto a una mesa.", fake_client, model="gpt-5.4-nano")
+
+    assert result == "Descansaba junto a una mesa."
+    _, kwargs = fake_client.responses.create.call_args
+    assert kwargs["model"] == "gpt-5.4-nano"
+    assert kwargs["input"][1]["content"] == "Estaba junto a una mesa."

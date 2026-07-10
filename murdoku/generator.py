@@ -147,3 +147,45 @@ def assign_clues_and_objects(
         clues[person_id] = {"type": "object_adjacent", "object": obj}
 
     return cells, clues
+
+
+def render_clue_template(structured: dict) -> str:
+    """Redaccion fija en español a partir de una pista estructurada.
+
+    No pretende sonar natural por si sola -- es la base determinista
+    que luego reformula `reword_with_llm`.
+    """
+    clue_type = structured.get("type")
+
+    if clue_type == "area":
+        return f"Estaba en la sala {structured['area']}."
+
+    if clue_type == "object_on":
+        return f"Estaba sobre una {structured['object']}."
+
+    if clue_type == "object_adjacent":
+        return f"Estaba junto a una {structured['object']}."
+
+    raise ValueError(f"no hay plantilla para el tipo de pista: {clue_type!r}")
+
+
+REWORD_SYSTEM_PROMPT = """Reescribe la siguiente pista de un puzzle de misterio
+en español, manteniendo EXACTAMENTE el mismo significado (no añadas ni quites
+informacion). Solo dale una redaccion mas natural y variada. Devuelve
+unicamente la frase reescrita, sin comillas ni explicacion adicional."""
+
+
+def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
+    response = client.responses.create(
+        model=model,
+        input=[
+            {"type": "message", "role": "developer", "content": REWORD_SYSTEM_PROMPT},
+            {"type": "message", "role": "user", "content": text},
+        ],
+    )
+    for item in response.output:
+        if item.type == "message":
+            for content in item.content:
+                if content.type == "output_text":
+                    return content.text.strip()
+    return text
