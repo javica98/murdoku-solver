@@ -1,7 +1,7 @@
 import random
 
-from murdoku.schema import Cell
-from murdoku.verifier import parse_cell_id
+from murdoku.schema import Cell, Puzzle
+from murdoku.verifier import clue_holds, parse_cell_id
 
 
 def _orthogonal_neighbor_ids(cell_id: str, rows: int, cols: int) -> list[str]:
@@ -189,3 +189,88 @@ def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
                 if content.type == "output_text":
                     return content.text.strip()
     return text
+
+
+# Tipos que solo dependen de la celda propia de la persona (y de la
+# geometria estatica del tablero) -- nunca de donde esta colocada otra
+# persona. Son seguros para descartar una rama antes de tiempo durante
+# la busqueda. Todo lo demas (with_person, relational_person,
+# empty_neighbor, unique_object_on...) depende de gente que puede que
+# aun no este colocada, asi que no se puede comprobar de forma fiable
+# hasta tener la colocacion completa.
+_ROW_LOCAL_TYPES = {"area", "object_on", "object_adjacent", "absolute_position"}
+
+
+def _is_row_local_clue(structured: dict) -> bool:
+    clue_type = structured.get("type")
+    if clue_type in ("all", "any"):
+        return all(_is_row_local_clue(clause) for clause in structured.get("clauses", []))
+    return clue_type in _ROW_LOCAL_TYPES
+
+
+def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str, str]]:
+    """Busca por fuerza bruta colocaciones validas que cumplan todas las
+    pistas, parando en cuanto encuentra `max_solutions`.
+
+    Usa backtracking (fila por fila, probando cada persona/columna libre)
+    en vez de generar todas las permutaciones y filtrar: para las pistas
+    "de celda propia" (area, object_on, object_adjacent,
+    absolute_position), en cuanto fallan se descarta la rama sin seguir
+    explorando. Las pistas relacionales (dependen de otras personas) no
+    se pueden comprobar de forma fiable a medias, asi que se verifican
+    todas juntas al completar cada colocacion candidata.
+    """
+    rows = puzzle.grid.rows
+    cols = puzzle.grid.cols
+    person_ids = [person.id for person in puzzle.people]
+    clue_by_person = {
+        person.id: person.clue.structured
+        for person in puzzle.people
+        if person.clue is not None and person.clue.structured is not None
+    }
+
+    solutions: list[dict[str, str]] = []
+
+    def backtrack(row: int, used_cols: set[int], assignment: dict[str, str], remaining: list[str]) -> None:
+        if len(solutions) >= max_solutions:
+            return
+        if row == rows:
+            if all(
+                clue_holds(structured, person_id, assignment[person_id], puzzle, assignment)
+                for person_id, structured in clue_by_person.items()
+            ):
+                solutions.append(dict(assignment))
+            return
+
+        for person_id in remaining:
+            for col in range(cols):
+                if col in used_cols:
+                    continue
+                cell_id = f"r{row}c{col}"
+                cell = puzzle.cells.get(cell_id)
+                if cell is None or cell.blocked:
+                    continue
+
+                structured = clue_by_person.get(person_id)
+                assignment[person_id] = cell_id
+                if (
+                    structured is not None
+                    and _is_row_local_clue(structured)
+                    and not clue_holds(structured, person_id, cell_id, puzzle, assignment)
+                ):
+                    del assignment[person_id]
+                    continue
+
+                new_remaining = [p for p in remaining if p != person_id]
+                backtrack(row + 1, used_cols | {col}, assignment, new_remaining)
+                del assignment[person_id]
+
+                if len(solutions) >= max_solutions:
+                    return
+
+    backtrack(0, set(), {}, person_ids)
+    return solutions
+
+
+def has_unique_solution(puzzle: Puzzle) -> bool:
+    return len(find_all_solutions(puzzle, max_solutions=2)) == 1

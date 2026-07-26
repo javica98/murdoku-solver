@@ -6,12 +6,14 @@ import pytest
 from murdoku.generator import (
     NON_BLOCKING_OBJECTS,
     assign_clues_and_objects,
+    find_all_solutions,
     generate_placement,
     generate_rooms,
+    has_unique_solution,
     render_clue_template,
     reword_with_llm,
 )
-from murdoku.schema import Clue, Grid, Person, Puzzle
+from murdoku.schema import Cell, Clue, Grid, Person, Puzzle
 from murdoku.verifier import (
     check_clues_satisfied,
     check_no_blocked_cells,
@@ -226,3 +228,82 @@ def test_reword_with_llm_returns_the_models_text_and_calls_the_right_model():
     _, kwargs = fake_client.responses.create.call_args
     assert kwargs["model"] == "gpt-5.4-nano"
     assert kwargs["input"][1]["content"] == "Estaba junto a una mesa."
+
+
+def _puzzle_with_four_single_cell_areas() -> Puzzle:
+    # 2x2, cada celda es su propia sala: el clue "area X" solo puede
+    # cumplirse en una celda concreta.
+    cells = {
+        "r0c0": Cell(area="A"),
+        "r0c1": Cell(area="B"),
+        "r1c0": Cell(area="C"),
+        "r1c1": Cell(area="D"),
+    }
+    return Puzzle(
+        id="unique_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=2, cols=2),
+        areas={"A": ["r0c0"], "B": ["r0c1"], "C": ["r1c0"], "D": ["r1c1"]},
+        cells=cells,
+        people=[
+            Person(
+                id="Ada",
+                role="suspect",
+                clue=Clue(text="...", structured={"type": "area", "area": "A"}),
+            ),
+            Person(
+                id="Bruno",
+                role="suspect",
+                clue=Clue(text="...", structured={"type": "area", "area": "D"}),
+            ),
+        ],
+    )
+
+
+def test_finds_the_unique_solution_when_clues_force_it():
+    puzzle = _puzzle_with_four_single_cell_areas()
+    solutions = find_all_solutions(puzzle, max_solutions=5)
+    assert solutions == [{"Ada": "r0c0", "Bruno": "r1c1"}]
+    assert has_unique_solution(puzzle)
+
+
+def _puzzle_with_an_ambiguous_solution() -> Puzzle:
+    # 2x2, una sola sala que cubre todo: la pista de Ada no distingue
+    # ninguna celda, y Bruno no tiene pista -- cualquiera de las 2
+    # colocaciones validas sirve.
+    cells = {cell_id: Cell(area="ROOM") for cell_id in ["r0c0", "r0c1", "r1c0", "r1c1"]}
+    return Puzzle(
+        id="ambiguous_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=2, cols=2),
+        areas={"ROOM": list(cells.keys())},
+        cells=cells,
+        people=[
+            Person(
+                id="Ada",
+                role="suspect",
+                clue=Clue(text="...", structured={"type": "area", "area": "ROOM"}),
+            ),
+            Person(id="Bruno", role="victim"),
+        ],
+    )
+
+
+def test_does_not_have_a_unique_solution_when_clues_are_too_loose():
+    puzzle = _puzzle_with_an_ambiguous_solution()
+    assert not has_unique_solution(puzzle)
+    assert len(find_all_solutions(puzzle, max_solutions=5)) > 1
+
+
+def test_backtracking_search_finds_the_generators_own_solution():
+    rng = random.Random(11)
+    people = ["Ada", "Bruno", "Carmen", "Diana"]
+    placement = generate_placement(4, 4, people, rng=rng)
+    rooms = generate_rooms(4, 4, ["A", "B"], rng=rng)
+    cells, clues = assign_clues_and_objects(placement, rooms, 4, 4, rng=rng)
+    puzzle = _build_puzzle(4, 4, cells, placement, clues)
+
+    solutions = find_all_solutions(puzzle, max_solutions=10)
+    assert placement in solutions

@@ -115,7 +115,7 @@ def _orthogonal_neighbors(row: int, col: int) -> list[tuple[int, int]]:
     return [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]
 
 
-def _clue_holds(
+def clue_holds(
     structured: dict[str, Any],
     person_id: str,
     cell_id: str,
@@ -128,7 +128,7 @@ def _clue_holds(
 
     if clue_type == "all":
         for clause in structured.get("clauses", []):
-            result = _clue_holds(clause, person_id, cell_id, puzzle, solution)
+            result = clue_holds(clause, person_id, cell_id, puzzle, solution)
             if clause.get("negate"):
                 result = not result
             if not result:
@@ -137,7 +137,7 @@ def _clue_holds(
 
     if clue_type == "any":
         for clause in structured.get("clauses", []):
-            result = _clue_holds(clause, person_id, cell_id, puzzle, solution)
+            result = clue_holds(clause, person_id, cell_id, puzzle, solution)
             if clause.get("negate"):
                 result = not result
             if result:
@@ -282,7 +282,7 @@ def check_clues_satisfied(puzzle: Puzzle, solution: dict[str, str]) -> list[str]
             violations.append(f"{person.id} has no valid placement to check their clue")
             continue
 
-        if not _clue_holds(person.clue.structured, person.id, cell_id, puzzle, solution):
+        if not clue_holds(person.clue.structured, person.id, cell_id, puzzle, solution):
             violations.append(f"{person.id}'s clue is not satisfied at {cell_id}")
 
     return violations
