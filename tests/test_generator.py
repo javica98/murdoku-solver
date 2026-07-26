@@ -8,6 +8,7 @@ from murdoku.generator import (
     assign_clues_and_objects,
     find_all_solutions,
     generate_placement,
+    generate_puzzle,
     generate_rooms,
     has_unique_solution,
     render_clue_template,
@@ -18,6 +19,7 @@ from murdoku.verifier import (
     check_clues_satisfied,
     check_no_blocked_cells,
     check_unique_rows_and_cols,
+    identify_murderer,
     parse_cell_id,
 )
 
@@ -307,3 +309,58 @@ def test_backtracking_search_finds_the_generators_own_solution():
 
     solutions = find_all_solutions(puzzle, max_solutions=10)
     assert placement in solutions
+
+
+def _generate(seed: int, rows: int = 5, cols: int = 5) -> Puzzle:
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena"][:rows]
+    return generate_puzzle(
+        rows,
+        cols,
+        people,
+        victim_id=people[-1],
+        area_names=["A", "B", "C", "D", "E"],
+        scenario="Test",
+        difficulty="easy",
+        rng=random.Random(seed),
+    )
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_generated_puzzle_is_fully_valid(seed):
+    puzzle = _generate(seed)
+    solution = puzzle.solution
+
+    assert check_unique_rows_and_cols(solution) == []
+    assert check_no_blocked_cells(puzzle, solution) == []
+    assert check_clues_satisfied(puzzle, solution) == []
+    assert identify_murderer(puzzle, solution) is not None
+    assert has_unique_solution(puzzle)
+
+
+def test_victim_has_no_clue_and_suspects_all_do():
+    puzzle = _generate(seed=3)
+    for person in puzzle.people:
+        if person.role == "victim":
+            assert person.clue is None
+        else:
+            assert person.clue is not None
+
+
+def test_generate_puzzle_is_reproducible_with_the_same_seed():
+    puzzle_a = _generate(seed=17)
+    puzzle_b = _generate(seed=17)
+    assert puzzle_a.solution == puzzle_b.solution
+    assert puzzle_a.cells == puzzle_b.cells
+
+
+def test_generate_puzzle_rejects_victim_not_in_person_ids():
+    with pytest.raises(ValueError):
+        generate_puzzle(
+            3,
+            3,
+            ["Ada", "Bruno", "Carmen"],
+            victim_id="Nobody",
+            area_names=["A"],
+            scenario="Test",
+            difficulty="easy",
+        )

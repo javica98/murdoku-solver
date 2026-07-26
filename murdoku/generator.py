@@ -1,7 +1,7 @@
 import random
 
-from murdoku.schema import Cell, Puzzle
-from murdoku.verifier import clue_holds, parse_cell_id
+from murdoku.schema import Cell, Clue, Grid, Person, Puzzle
+from murdoku.verifier import clue_holds, identify_murderer, parse_cell_id
 
 
 def _orthogonal_neighbor_ids(cell_id: str, rows: int, cols: int) -> list[str]:
@@ -274,3 +274,82 @@ def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str,
 
 def has_unique_solution(puzzle: Puzzle) -> bool:
     return len(find_all_solutions(puzzle, max_solutions=2)) == 1
+
+
+def generate_puzzle(
+    rows: int,
+    cols: int,
+    person_ids: list[str],
+    victim_id: str,
+    area_names: list[str],
+    scenario: str,
+    difficulty: str,
+    rng: random.Random | None = None,
+    max_attempts: int = 500,
+) -> Puzzle:
+    """Genera un puzzle completo con solucion unica y asesino identificable.
+
+    Junta los 4 pasos anteriores (colocar personas, geometria+objetos+
+    pistas, texto de plantilla, comprobar unicidad). Si un intento sale
+    ambiguo o sin asesino determinable, se reintenta desde cero (nueva
+    colocacion, nuevas salas, nuevas pistas) hasta `max_attempts` veces.
+
+    Con una sola pista simple por persona (elegida al azar), la
+    probabilidad de que un intento salga unico + con asesino
+    identificable es baja (puede rondar el 1-5%) -- el cuello de botella
+    es la unicidad, no el asesino. Cada intento es muy rapido (sub-
+    milisegundo), asi que un limite generoso compensa la baja tasa de
+    acierto sin coste real. Si en el futuro esto sigue fallando a
+    menudo, la mejora pasa por dar pistas mas restrictivas, no por subir
+    aun mas este numero.
+    """
+    if victim_id not in person_ids:
+        raise ValueError(f"victim_id {victim_id!r} not in person_ids")
+
+    if rng is None:
+        rng = random.Random()
+
+    for attempt in range(max_attempts):
+        placement = generate_placement(rows, cols, person_ids, rng=rng)
+        rooms = generate_rooms(rows, cols, area_names, rng=rng)
+        cells, clues = assign_clues_and_objects(placement, rooms, rows, cols, rng=rng)
+
+        areas: dict[str, list[str]] = {}
+        for cell_id, cell in cells.items():
+            areas.setdefault(cell.area, []).append(cell_id)
+
+        people = [
+            Person(
+                id=person_id,
+                role="victim" if person_id == victim_id else "suspect",
+                clue=(
+                    None
+                    if person_id == victim_id
+                    else Clue(
+                        text=render_clue_template(clues[person_id]),
+                        structured=clues[person_id],
+                    )
+                ),
+            )
+            for person_id in person_ids
+        ]
+
+        puzzle = Puzzle(
+            id=f"generated_{attempt}",
+            scenario=scenario,
+            difficulty=difficulty,
+            grid=Grid(rows=rows, cols=cols),
+            areas=areas,
+            cells=cells,
+            people=people,
+            solution=placement,
+        )
+
+        if identify_murderer(puzzle, placement) is None:
+            continue
+        if not has_unique_solution(puzzle):
+            continue
+
+        return puzzle
+
+    raise RuntimeError(f"no se logro un puzzle valido en {max_attempts} intentos")
