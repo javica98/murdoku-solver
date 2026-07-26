@@ -215,6 +215,19 @@ def test_render_clue_template_rejects_unsupported_type():
         render_clue_template({"type": "relational_person", "relation": "alone"})
 
 
+def test_render_clue_template_joins_all_clauses_into_one_text():
+    text = render_clue_template(
+        {
+            "type": "all",
+            "clauses": [
+                {"type": "area", "area": "JARDIN"},
+                {"type": "object_on", "object": "silla"},
+            ],
+        }
+    )
+    assert text == "Estaba en la sala JARDIN. Estaba sobre una silla."
+
+
 def test_reword_with_llm_returns_the_models_text_and_calls_the_right_model():
     # "doble" (mock) del cliente de OpenAI: no llamamos a la API de verdad,
     # solo comprobamos que nuestra funcion la usa correctamente.
