@@ -10,35 +10,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from murdoku.schema import Puzzle
-
-SYSTEM_PROMPT = """Eres un detective resolviendo un puzzle de logica tipo sudoku.
-
-Reglas del juego:
-- Cada persona (sospechosos + victima) ocupa una celda distinta del tablero.
-- Cada fila y columna puede tener como maximo una persona (sospechoso o
-  victima).
-- Cada celda tiene un campo "blocked". Las celdas con "blocked": true NO se
-  pueden ocupar bajo ninguna circunstancia, aunque parezcan encajar con una
-  pista. Objetos como estanterias, mesas o plantas normalmente bloquean la
-  celda (nadie puede estar de pie sobre ellos); alfombras y sillas no.
-- Cada sospechoso tiene una pista en texto que describe donde estaba.
-- Debes cumplir TODAS las pistas a la vez.
-- Antes de dar tu respuesta final, revisa DOS VECES tu propia respuesta: (1)
-  que ninguna fila ni columna se repita entre las personas elegidas, y (2)
-  que ninguna celda elegida tenga "blocked": true.
-
-Devuelve UNICAMENTE un JSON con este formato, sin explicacion adicional:
-{"Nombre1": "rXcY", "Nombre2": "rXcY", ...}
-"""
-
-
-def build_solver_view(puzzle: Puzzle) -> dict:
-    view = puzzle.model_dump(exclude={"solution"})
-    for person in view["people"]:
-        clue = person.get("clue")
-        if clue:
-            clue.pop("structured", None)
-    return view
+from murdoku.solver import solve_with_llm
 
 
 def main(path: str, model: str) -> None:
@@ -49,33 +21,13 @@ def main(path: str, model: str) -> None:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     puzzle = Puzzle.model_validate(data)
-    solver_view = build_solver_view(puzzle)
 
     client = OpenAI()
-    response = client.responses.create(
-        model=model,
-        reasoning={"effort": "high"},
-        input=[
-            {"type": "message", "role": "developer", "content": SYSTEM_PROMPT},
-            {
-                "type": "message",
-                "role": "user",
-                "content": json.dumps(solver_view, ensure_ascii=False),
-            },
-        ],
-    )
-
-    answer_text = ""
-    for item in response.output:
-        if item.type == "message":
-            for content in item.content:
-                if content.type == "output_text":
-                    answer_text += content.text
+    proposed_solution, usage = solve_with_llm(puzzle, client, model)
 
     print("--- Respuesta cruda del modelo ---")
-    print(answer_text)
+    print(json.dumps(proposed_solution, ensure_ascii=False))
 
-    usage = response.usage
     print("\n--- Uso de tokens ---")
     print(f"input_tokens: {usage.input_tokens}")
     print(f"output_tokens: {usage.output_tokens}")
@@ -83,7 +35,6 @@ def main(path: str, model: str) -> None:
         print(f"reasoning_tokens: {usage.output_tokens_details.reasoning_tokens}")
     print(f"total_tokens: {usage.total_tokens}")
 
-    proposed_solution = json.loads(answer_text)
     out_path = path.replace(".json", ".llm_answer.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(proposed_solution, f, indent=2, ensure_ascii=False)
