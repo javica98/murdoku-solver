@@ -89,9 +89,6 @@ NON_BLOCKING_OBJECTS = ["silla", "alfombra", "cama"]
 ALL_OBJECTS = BLOCKING_OBJECTS + NON_BLOCKING_OBJECTS
 
 
-_AVAILABLE_CLUE_TYPES = ["area", "object_on", "object_adjacent"]
-
-
 def _make_area_clause(cell: Cell) -> dict:
     return {"type": "area", "area": cell.area}
 
@@ -127,6 +124,63 @@ def _make_object_adjacent_clause(
     return {"type": "object_adjacent", "object": obj}
 
 
+def _people_sharing_area(
+    person_id: str, area: str, cells: dict[str, Cell], placement: dict[str, str]
+) -> list[str]:
+    return sorted(
+        pid
+        for pid, other_cell_id in placement.items()
+        if pid != person_id and cells[other_cell_id].area == area
+    )
+
+
+def _people_with_smaller_row(person_id: str, row: int, placement: dict[str, str]) -> list[str]:
+    return sorted(
+        pid
+        for pid, other_cell_id in placement.items()
+        if pid != person_id and parse_cell_id(other_cell_id)[0] < row
+    )
+
+
+def _available_relational_types(
+    person_id: str,
+    cell_id: str,
+    cell: Cell,
+    cells: dict[str, Cell],
+    placement: dict[str, str],
+    occupied_cells: set[str],
+    rows: int,
+    cols: int,
+) -> list[str]:
+    """Que tipos de pista relacional son ciertos AHORA MISMO para esta
+    persona, dada la colocacion ya completa de todo el mundo.
+
+    A diferencia de area/object_on/object_adjacent (siempre se pueden
+    forzar colocando un objeto), estos dependen de si la geometria y la
+    colocacion ya dan la casualidad de que son ciertos -- por eso hace
+    falta comprobar disponibilidad antes de elegir uno.
+    """
+    types = []
+
+    row, _ = parse_cell_id(cell_id)
+    has_free_neighbor = any(
+        n not in occupied_cells for n in _orthogonal_neighbor_ids(cell_id, rows, cols)
+    )
+    others_in_area = _people_sharing_area(person_id, cell.area, cells, placement)
+    people_south_of = _people_with_smaller_row(person_id, row, placement)
+
+    if has_free_neighbor:
+        types.append("empty_neighbor")
+    if not others_in_area:
+        types.append("relational_person_alone")
+    if others_in_area:
+        types.append("with_person")
+    if people_south_of:
+        types.append("relative_to_person")
+
+    return types
+
+
 def assign_clues_and_objects(
     placement: dict[str, str],
     cells: dict[str, Cell],
@@ -134,17 +188,26 @@ def assign_clues_and_objects(
     cols: int,
     rng: random.Random | None = None,
     num_clues: int = 1,
+    num_relational_people: int = 0,
 ) -> tuple[dict[str, Cell], dict[str, dict]]:
     """Para cada persona, elige `num_clues` tipos de pista ciertos segun su
     colocacion (combinados con "all" si son mas de uno) y coloca los
     objetos que hagan falta para que lo sean.
 
-    Solo cubre los 3 tipos mas simples de la taxonomia (area, object_on,
-    object_adjacent); los relacionales (que dependen de donde esta el
-    resto de gente) se añaden en un paso posterior. Con una sola pista
-    por persona, tableros grandes casi nunca salen con solucion unica
-    (ver nota en generate_puzzle) -- mas pistas combinadas por persona
-    ayuda a que la unicidad se logre sin depender tanto del azar.
+    Cubre los 3 tipos "de celda propia" (area, object_on, object_adjacent
+    -- siempre se pueden forzar) y 4 relacionales (empty_neighbor,
+    relational_person/alone, with_person, relative_to_person -- solo
+    disponibles si la colocacion ya los hace ciertos por si sola, ver
+    `_available_relational_types`).
+
+    Las relacionales no se pueden podar temprano al comprobar unicidad
+    (dependen de donde esta el resto de gente, no solo de la celda
+    propia) -- si demasiada gente las tiene a la vez en un tablero
+    grande, la busqueda de unicidad se vuelve casi exhaustiva y puede
+    tardar una eternidad. `num_relational_people` limita a cuantas
+    personas (elegidas al azar) se les ofrece la opcion de tener una
+    pista relacional; el resto se queda solo con las 3 de celda propia,
+    que sabemos que podan bien sea cual sea el tamaño del tablero.
 
     Devuelve una copia de `cells` con los objetos añadidos, y un dict
     persona -> clue.structured.
@@ -152,18 +215,25 @@ def assign_clues_and_objects(
     if rng is None:
         rng = random.Random()
 
-    if not 1 <= num_clues <= len(_AVAILABLE_CLUE_TYPES):
-        raise ValueError(
-            f"num_clues must be between 1 and {len(_AVAILABLE_CLUE_TYPES)}, got {num_clues}"
-        )
-
     cells = {cell_id: cell.model_copy(deep=True) for cell_id, cell in cells.items()}
     occupied_cells = set(placement.values())
     clues: dict[str, dict] = {}
 
+    person_ids = list(placement.keys())
+    relational_eligible = set(
+        rng.sample(person_ids, min(num_relational_people, len(person_ids)))
+    )
+
     for person_id, cell_id in placement.items():
         cell = cells[cell_id]
-        chosen_types = rng.sample(_AVAILABLE_CLUE_TYPES, num_clues)
+        row, _ = parse_cell_id(cell_id)
+
+        available_types = ["area", "object_on", "object_adjacent"]
+        if person_id in relational_eligible:
+            available_types += _available_relational_types(
+                person_id, cell_id, cell, cells, placement, occupied_cells, rows, cols
+            )
+        chosen_types = rng.sample(available_types, min(num_clues, len(available_types)))
 
         clauses = []
         for clue_type in chosen_types:
@@ -171,11 +241,23 @@ def assign_clues_and_objects(
                 clauses.append(_make_area_clause(cell))
             elif clue_type == "object_on":
                 clauses.append(_make_object_on_clause(cell, rng))
-            else:
+            elif clue_type == "object_adjacent":
                 clause = _make_object_adjacent_clause(
                     cell_id, cells, occupied_cells, rows, cols, rng
                 )
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "empty_neighbor":
+                clauses.append({"type": "empty_neighbor"})
+            elif clue_type == "relational_person_alone":
+                clauses.append({"type": "relational_person", "relation": "alone"})
+            elif clue_type == "with_person":
+                reference = rng.choice(_people_sharing_area(person_id, cell.area, cells, placement))
+                clauses.append({"type": "with_person", "reference": reference})
+            elif clue_type == "relative_to_person":
+                reference = rng.choice(_people_with_smaller_row(person_id, row, placement))
+                clauses.append(
+                    {"type": "relative_to_person", "reference": reference, "direction": "south"}
+                )
 
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
@@ -201,6 +283,18 @@ def render_clue_template(structured: dict) -> str:
 
     if clue_type == "object_adjacent":
         return f"Estaba junto a una {structured['object']}."
+
+    if clue_type == "empty_neighbor":
+        return "Habia una celda vacia justo a su lado."
+
+    if clue_type == "relational_person" and structured.get("relation") == "alone":
+        return "Estaba a solas."
+
+    if clue_type == "with_person":
+        return f"Estaba con {structured['reference']}."
+
+    if clue_type == "relative_to_person" and structured.get("direction") == "south":
+        return f"Estaba al sur de {structured['reference']}."
 
     raise ValueError(f"no hay plantilla para el tipo de pista: {clue_type!r}")
 
@@ -229,22 +323,81 @@ def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
 
 # Tipos que solo dependen de la celda propia de la persona (y de la
 # geometria estatica del tablero) -- nunca de donde esta colocada otra
-# persona. Son seguros para descartar una rama antes de tiempo durante
-# la busqueda. Todo lo demas (with_person, relational_person,
-# empty_neighbor, unique_object_on...) depende de gente que puede que
-# aun no este colocada, asi que no se puede comprobar de forma fiable
-# hasta tener la colocacion completa.
+# persona. Siempre se pueden evaluar del todo en cuanto se coloca a esa
+# persona.
 _ROW_LOCAL_TYPES = {"area", "object_on", "object_adjacent", "absolute_position"}
 
+# Tipos que dependen de una persona concreta, nombrada por id. Se pueden
+# evaluar en cuanto ESA persona (no falta que este todo el mundo) ya
+# tiene celda asignada.
+_SINGLE_REFERENCE_TYPES = {"with_person", "relative_to_person"}
 
-def _is_row_local_clue(structured: dict) -> bool:
+
+def _partial_eval(
+    structured: dict,
+    person_id: str,
+    cell_id: str,
+    puzzle: Puzzle,
+    assignment: dict[str, str],
+) -> bool | None:
+    """Evalua una pista con la informacion que haya AHORA MISMO.
+
+    Devuelve True/False si ya se puede saber con certeza (aunque falte
+    gente por colocar, para clausulas de "all"/"any" a veces ya se sabe
+    el resultado final igual), o None si todavia no hay suficiente
+    informacion para decidir (p.ej. una referencia a alguien que aun no
+    tiene celda). Esto es lo que permite podar una pista relacional en
+    cuanto se puede, en vez de esperar siempre a que este todo colocado.
+    """
     clue_type = structured.get("type")
+
     if clue_type in ("all", "any"):
-        return all(_is_row_local_clue(clause) for clause in structured.get("clauses", []))
-    return clue_type in _ROW_LOCAL_TYPES
+        results = []
+        for clause in structured.get("clauses", []):
+            result = _partial_eval(clause, person_id, cell_id, puzzle, assignment)
+            if clause.get("negate") and result is not None:
+                result = not result
+            results.append(result)
+
+        if clue_type == "all":
+            if any(r is False for r in results):
+                return False
+            return True if all(r is True for r in results) else None
+
+        # "any"
+        if any(r is True for r in results):
+            return True
+        return False if all(r is False for r in results) else None
+
+    if clue_type in _SINGLE_REFERENCE_TYPES:
+        if structured.get("reference") not in assignment:
+            return None
+        return clue_holds(structured, person_id, cell_id, puzzle, assignment)
+
+    if clue_type in _ROW_LOCAL_TYPES:
+        return clue_holds(structured, person_id, cell_id, puzzle, assignment)
+
+    # Tipos "globales" (relational_person/alone, relational_attribute,
+    # unique_object_on, empty_neighbor...): dependen de quien mas pueda
+    # llegar a colocarse en cualquier sitio, no de una persona concreta
+    # ya conocida -- no se pueden confirmar ni descartar de forma
+    # fiable hasta tener la colocacion completa.
+    return None
 
 
-def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str, str]]:
+class SearchBudgetExceeded(Exception):
+    """La busqueda de find_all_solutions supero max_nodes sin terminar.
+
+    Con muchas pistas relacionales (no podables temprano) en un tablero
+    grande, la busqueda puede acercarse a explorar casi todo el espacio.
+    Este tope evita que se quede colgada indefinidamente; quien la llama
+    decide que hacer (has_unique_solution la trata como "no confirmado").
+    """
+
+
+def find_all_solutions(
+    puzzle: Puzzle, max_solutions: int = 2, max_nodes: int = 300_000
+) -> list[dict[str, str]]:
     """Busca por fuerza bruta colocaciones validas que cumplan todas las
     pistas, parando en cuanto encuentra `max_solutions`.
 
@@ -254,7 +407,9 @@ def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str,
     absolute_position), en cuanto fallan se descarta la rama sin seguir
     explorando. Las pistas relacionales (dependen de otras personas) no
     se pueden comprobar de forma fiable a medias, asi que se verifican
-    todas juntas al completar cada colocacion candidata.
+    todas juntas al completar cada colocacion candidata -- si hay muchas
+    a la vez en un tablero grande, la busqueda apenas poda y `max_nodes`
+    puede saltar (ver SearchBudgetExceeded).
     """
     rows = puzzle.grid.rows
     cols = puzzle.grid.cols
@@ -266,8 +421,11 @@ def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str,
     }
 
     solutions: list[dict[str, str]] = []
+    nodes_visited = 0
 
     def backtrack(row: int, used_cols: set[int], assignment: dict[str, str], remaining: list[str]) -> None:
+        nonlocal nodes_visited
+
         if len(solutions) >= max_solutions:
             return
         if row == rows:
@@ -287,13 +445,15 @@ def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str,
                 if cell is None or cell.blocked:
                     continue
 
+                nodes_visited += 1
+                if nodes_visited > max_nodes:
+                    raise SearchBudgetExceeded(f"exceeded {max_nodes} nodes")
+
                 structured = clue_by_person.get(person_id)
                 assignment[person_id] = cell_id
-                if (
-                    structured is not None
-                    and _is_row_local_clue(structured)
-                    and not clue_holds(structured, person_id, cell_id, puzzle, assignment)
-                ):
+                if structured is not None and _partial_eval(
+                    structured, person_id, cell_id, puzzle, assignment
+                ) is False:
                     del assignment[person_id]
                     continue
 
@@ -308,8 +468,15 @@ def find_all_solutions(puzzle: Puzzle, max_solutions: int = 2) -> list[dict[str,
     return solutions
 
 
-def has_unique_solution(puzzle: Puzzle) -> bool:
-    return len(find_all_solutions(puzzle, max_solutions=2)) == 1
+def has_unique_solution(puzzle: Puzzle, max_nodes: int = 300_000) -> bool:
+    try:
+        return len(find_all_solutions(puzzle, max_solutions=2, max_nodes=max_nodes)) == 1
+    except SearchBudgetExceeded:
+        # no pudimos confirmar unicidad dentro del presupuesto -- lo mas
+        # seguro es tratarlo como "no unico" y dejar que generate_puzzle
+        # lo descarte y reintente, en vez de arriesgarnos a dar por bueno
+        # un puzzle que no llegamos a verificar del todo.
+        return False
 
 
 def generate_puzzle(
@@ -323,6 +490,7 @@ def generate_puzzle(
     rng: random.Random | None = None,
     max_attempts: int = 500,
     num_clues: int = 1,
+    num_relational_people: int = 0,
 ) -> Puzzle:
     """Genera un puzzle completo con solucion unica y asesino identificable.
 
@@ -347,7 +515,13 @@ def generate_puzzle(
         placement = generate_placement(rows, cols, person_ids, rng=rng)
         rooms = generate_rooms(rows, cols, area_names, rng=rng)
         cells, clues = assign_clues_and_objects(
-            placement, rooms, rows, cols, rng=rng, num_clues=num_clues
+            placement,
+            rooms,
+            rows,
+            cols,
+            rng=rng,
+            num_clues=num_clues,
+            num_relational_people=num_relational_people,
         )
 
         areas: dict[str, list[str]] = {}
@@ -391,17 +565,18 @@ def generate_puzzle(
     raise RuntimeError(f"no se logro un puzzle valido en {max_attempts} intentos")
 
 
-# Tramos de dificultad: la palanca principal es el tamaño del tablero y
-# el numero de salas -- las pistas relacionales y los twists (objetos
-# multi-celda, paridad) de la Fase 2 son trabajo futuro del generador,
-# aunque el verificador ya los entiende. `num_clues` sube en los tramos
-# grandes porque, medido empiricamente, una sola pista por persona casi
-# nunca produce solucion unica en tableros de 8x8/9x9 (~0% de acierto).
+# Tramos de dificultad: tamaño del tablero + numero de salas + cuantas
+# pistas se combinan por persona + cuanta gente puede tener una pista
+# relacional a la vez. Los twists (objetos multi-celda, paridad) de la
+# Fase 2 siguen sin implementarse en el generador, aunque el verificador
+# ya los entiende. Valores medidos empiricamente: dan solucion unica +
+# asesino identificable en un tiempo razonable (sub-segundo por intento)
+# en los 4 tramos, incluido 9x9 con pistas relacionales de verdad.
 DIFFICULTY_TIERS = {
-    "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 1},
-    "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2},
-    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 2},
-    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 3},
+    "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 2, "num_relational_people": 2},
+    "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2, "num_relational_people": 2},
+    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 3, "num_relational_people": 3},
+    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 3, "num_relational_people": 3},
 }
 
 
@@ -437,4 +612,5 @@ def generate_puzzle_for_difficulty(
         rng=rng,
         max_attempts=max_attempts,
         num_clues=tier["num_clues"],
+        num_relational_people=tier["num_relational_people"],
     )

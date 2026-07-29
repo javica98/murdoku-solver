@@ -212,7 +212,7 @@ def test_render_clue_template_for_object_adjacent():
 
 def test_render_clue_template_rejects_unsupported_type():
     with pytest.raises(ValueError):
-        render_clue_template({"type": "relational_person", "relation": "alone"})
+        render_clue_template({"type": "unique_object_on", "object": "silla"})
 
 
 def test_render_clue_template_joins_all_clauses_into_one_text():
@@ -313,7 +313,10 @@ def test_does_not_have_a_unique_solution_when_clues_are_too_loose():
 
 
 def test_backtracking_search_finds_the_generators_own_solution():
-    rng = random.Random(11)
+    # aqui las pistas son solo de celda propia (num_clues=1 con el set
+    # original), asi que suelen fijar una solucion unica y la propia
+    # colocacion debe aparecer entre pocas soluciones encontradas.
+    rng = random.Random(0)
     people = ["Ada", "Bruno", "Carmen", "Diana"]
     placement = generate_placement(4, 4, people, rng=rng)
     rooms = generate_rooms(4, 4, ["A", "B"], rng=rng)
@@ -322,6 +325,22 @@ def test_backtracking_search_finds_the_generators_own_solution():
 
     solutions = find_all_solutions(puzzle, max_solutions=10)
     assert placement in solutions
+
+
+def test_generators_own_solution_always_satisfies_its_own_clues():
+    # con pistas relacionales (with_person, alone...) un puzzle puede
+    # salir ambiguo con num_clues=1, asi que la propia colocacion podria
+    # no aparecer entre las primeras N que encuentra la busqueda -- pero
+    # SIEMPRE tiene que superar la verificacion, sea o no unica.
+    for seed in range(20):
+        rng = random.Random(seed)
+        people = ["Ada", "Bruno", "Carmen", "Diana"]
+        placement = generate_placement(4, 4, people, rng=rng)
+        rooms = generate_rooms(4, 4, ["A", "B"], rng=rng)
+        cells, clues = assign_clues_and_objects(placement, rooms, 4, 4, rng=rng)
+        puzzle = _build_puzzle(4, 4, cells, placement, clues)
+
+        assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
 
 
 def _generate(seed: int, rows: int = 5, cols: int = 5) -> Puzzle:
@@ -335,6 +354,8 @@ def _generate(seed: int, rows: int = 5, cols: int = 5) -> Puzzle:
         scenario="Test",
         difficulty="easy",
         rng=random.Random(seed),
+        num_clues=2,
+        num_relational_people=2,
     )
 
 
