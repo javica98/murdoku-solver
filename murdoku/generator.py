@@ -575,8 +575,8 @@ def generate_puzzle(
 DIFFICULTY_TIERS = {
     "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 2, "num_relational_people": 2},
     "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2, "num_relational_people": 2},
-    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 3, "num_relational_people": 3},
-    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 3, "num_relational_people": 3},
+    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 3, "num_relational_people": 8},
+    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 3, "num_relational_people": 9},
 }
 
 
