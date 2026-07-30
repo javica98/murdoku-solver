@@ -174,6 +174,25 @@ def test_derived_clues_are_actually_true_according_to_our_own_verifier(seed):
     assert check_clues_satisfied(puzzle, placement) == []
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_derived_clues_hold_at_maximum_clue_density(seed):
+    # con num_clues y num_relational_people altos, TODOS los tipos nuevos
+    # (unique_object_on, absolute_position, any_area, negacion) entran en
+    # juego a la vez -- justo donde encontramos bugs reales de
+    # contaminacion entre pistas de distintas personas.
+    rng = random.Random(seed)
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=3, num_relational_people=6
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues)
+
+    assert check_no_blocked_cells(puzzle, placement) == []
+    assert check_clues_satisfied(puzzle, placement) == []
+
+
 def test_object_on_clues_use_only_non_blocking_objects():
     rng = random.Random(6)
     people = ["Ada", "Bruno", "Carmen", "Diana", "Elena"]
@@ -212,7 +231,7 @@ def test_render_clue_template_for_object_adjacent():
 
 def test_render_clue_template_rejects_unsupported_type():
     with pytest.raises(ValueError):
-        render_clue_template({"type": "unique_object_on", "object": "silla"})
+        render_clue_template({"type": "relational_attribute", "relation": "alone"})
 
 
 def test_render_clue_template_joins_all_clauses_into_one_text():

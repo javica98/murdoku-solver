@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from murdoku.schema import Person, Puzzle
+from murdoku.schema import Cell, Person, Puzzle
 
 _CELL_ID_RE = re.compile(r"^r(\d+)c(\d+)$")
 
@@ -95,15 +95,19 @@ def identify_murderer(puzzle: Puzzle, solution: dict[str, str]) -> str | None:
     return None
 
 
-def _area_bounding_box(puzzle: Puzzle, area: str) -> tuple[int, int, int, int]:
+def area_bounding_box(cells: dict[str, Cell], area: str) -> tuple[int, int, int, int]:
     """Fila/columna minima y maxima de las celdas que pertenecen a `area`.
+
+    Toma el dict de celdas directamente (no un Puzzle completo) para que
+    el generador tambien pueda reusarla mientras todavia esta construyendo
+    el puzzle, antes de tener un Puzzle valido.
 
     Asume que la sala es mas o menos rectangular. Si tiene forma de L,
     esto puede marcar como "esquina" alguna celda que visualmente no lo es.
     """
     rows = []
     cols = []
-    for cell_id, area_cell in puzzle.cells.items():
+    for cell_id, area_cell in cells.items():
         if area_cell.area == area:
             r, c = parse_cell_id(cell_id)
             rows.append(r)
@@ -122,27 +126,46 @@ def clue_holds(
     puzzle: Puzzle,
     solution: dict[str, str],
 ) -> bool:
+    """Si una pista se cumple, incluyendo su propio "negate" si lo lleva.
+
+    Es un envoltorio fino sobre `evaluate_clue_positive`: calcula el hecho
+    "en positivo" y lo invierte una sola vez si `structured` lleva
+    `"negate": true` -- sea esta la pista de nivel superior de una
+    persona, o una clausula dentro de un "all"/"any". Antes `negate` solo
+    se comprobaba dentro de esos combinadores, asi que una pista negada
+    SUELTA (sin combinador alrededor) nunca se invertia.
+    """
+    result = evaluate_clue_positive(structured, person_id, cell_id, puzzle, solution)
+    return not result if structured.get("negate") else result
+
+
+def evaluate_clue_positive(
+    structured: dict[str, Any],
+    person_id: str,
+    cell_id: str,
+    puzzle: Puzzle,
+    solution: dict[str, str],
+) -> bool:
+    """El hecho "en positivo" de una pista, sin mirar su propio "negate"
+    (eso es responsabilidad exclusiva de `clue_holds`). Las clausulas de
+    "all"/"any" SI pasan por `clue_holds` de forma recursiva, para que la
+    negacion de cada una se aplique exactamente una vez.
+    """
     cell = puzzle.cells[cell_id]
     row, col = parse_cell_id(cell_id)
     clue_type = structured.get("type")
 
     if clue_type == "all":
-        for clause in structured.get("clauses", []):
-            result = clue_holds(clause, person_id, cell_id, puzzle, solution)
-            if clause.get("negate"):
-                result = not result
-            if not result:
-                return False
-        return True
+        return all(
+            clue_holds(clause, person_id, cell_id, puzzle, solution)
+            for clause in structured.get("clauses", [])
+        )
 
     if clue_type == "any":
-        for clause in structured.get("clauses", []):
-            result = clue_holds(clause, person_id, cell_id, puzzle, solution)
-            if clause.get("negate"):
-                result = not result
-            if result:
-                return True
-        return False
+        return any(
+            clue_holds(clause, person_id, cell_id, puzzle, solution)
+            for clause in structured.get("clauses", [])
+        )
 
     if clue_type == "area":
         return cell.area == structured.get("area")
@@ -166,7 +189,7 @@ def clue_holds(
         if cell.area is None:
             return False
 
-        min_row, max_row, min_col, max_col = _area_bounding_box(puzzle, cell.area)
+        min_row, max_row, min_col, max_col = area_bounding_box(puzzle.cells, cell.area)
 
         if position == "corner":
             is_edge_row = row in (min_row, max_row)

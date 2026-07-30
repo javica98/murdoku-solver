@@ -1,7 +1,13 @@
 import random
 
 from murdoku.schema import Cell, Clue, Grid, Person, Puzzle
-from murdoku.verifier import clue_holds, identify_murderer, parse_cell_id
+from murdoku.verifier import (
+    area_bounding_box,
+    clue_holds,
+    evaluate_clue_positive,
+    identify_murderer,
+    parse_cell_id,
+)
 
 
 def _orthogonal_neighbor_ids(cell_id: str, rows: int, cols: int) -> list[str]:
@@ -93,8 +99,13 @@ def _make_area_clause(cell: Cell) -> dict:
     return {"type": "area", "area": cell.area}
 
 
-def _make_object_on_clause(cell: Cell, rng: random.Random) -> dict:
-    obj = rng.choice(NON_BLOCKING_OBJECTS)
+def _make_object_on_clause(
+    cell: Cell, rng: random.Random, forbidden: frozenset[str] = frozenset()
+) -> dict | None:
+    candidates = [obj for obj in NON_BLOCKING_OBJECTS if obj not in forbidden]
+    if not candidates:
+        return None
+    obj = rng.choice(candidates)
     cell.objects.append(obj)
     return {"type": "object_on", "object": obj}
 
@@ -106,22 +117,97 @@ def _make_object_adjacent_clause(
     rows: int,
     cols: int,
     rng: random.Random,
+    forbidden: frozenset[str] = frozenset(),
 ) -> dict | None:
     # solo en celdas vecinas libres, para no colocar un objeto bloqueante
-    # encima de otra persona.
+    # encima de otra persona. `forbidden` son objetos que alguna pista
+    # negada en otra parte del tablero necesita que NO aparezcan en
+    # ningun sitio (ver _make_negated_object_adjacent_clause).
     free_neighbors = [
         n for n in _orthogonal_neighbor_ids(cell_id, rows, cols) if n not in occupied_cells
     ]
-    if not free_neighbors:
+    candidates = [obj for obj in ALL_OBJECTS if obj not in forbidden]
+    if not free_neighbors or not candidates:
         return None
 
     neighbor_id = rng.choice(sorted(free_neighbors))
-    obj = rng.choice(ALL_OBJECTS)
+    obj = rng.choice(candidates)
     neighbor = cells[neighbor_id]
     neighbor.objects.append(obj)
     if obj in BLOCKING_OBJECTS:
         neighbor.blocked = True
     return {"type": "object_adjacent", "object": obj}
+
+
+def _make_absolute_position_clause(
+    cell_id: str, cell: Cell, cells: dict[str, Cell], rng: random.Random
+) -> dict | None:
+    if cell.area is None:
+        return None
+
+    row, col = parse_cell_id(cell_id)
+    min_row, max_row, min_col, max_col = area_bounding_box(cells, cell.area)
+
+    options = []
+    if row in (min_row, max_row) and col in (min_col, max_col):
+        options.append("corner")
+    if col == max_col:
+        options.append("last_column")
+    if not options:
+        return None
+
+    return {"type": "absolute_position", "position": rng.choice(options)}
+
+
+def _make_any_area_clause(cell: Cell, area_names: list[str], rng: random.Random) -> dict | None:
+    # el "o": una clausula cierta (su area de verdad) mas una senuelo (otra
+    # area cualquiera) -- el "any" solo necesita que UNA sea cierta.
+    decoys = [name for name in area_names if name != cell.area]
+    if not decoys:
+        return None
+    return {
+        "type": "any",
+        "clauses": [
+            {"type": "area", "area": cell.area},
+            {"type": "area", "area": rng.choice(decoys)},
+        ],
+    }
+
+
+def _make_negated_object_adjacent_clause(
+    cell_id: str, cells: dict[str, Cell], rows: int, cols: int, rng: random.Random
+) -> dict | None:
+    # la negacion: un objeto que NO esta en ninguna celda vecina.
+    adjacent_objects = set()
+    for neighbor_id in _orthogonal_neighbor_ids(cell_id, rows, cols):
+        adjacent_objects.update(cells[neighbor_id].objects)
+
+    false_candidates = [obj for obj in ALL_OBJECTS if obj not in adjacent_objects]
+    if not false_candidates:
+        return None
+
+    return {
+        "type": "object_adjacent",
+        "object": rng.choice(false_candidates),
+        "negate": True,
+    }
+
+
+def _make_unique_object_on_clause(
+    cell: Cell,
+    used_on_own_cell: set[str],
+    rng: random.Random,
+    forbidden: frozenset[str] = frozenset(),
+) -> dict | None:
+    candidates = [
+        obj for obj in NON_BLOCKING_OBJECTS if obj not in used_on_own_cell and obj not in forbidden
+    ]
+    if not candidates:
+        return None
+
+    obj = rng.choice(candidates)
+    cell.objects.append(obj)
+    return {"type": "unique_object_on", "object": obj}
 
 
 def _people_sharing_area(
@@ -142,7 +228,7 @@ def _people_with_smaller_row(person_id: str, row: int, placement: dict[str, str]
     )
 
 
-def _available_relational_types(
+def _available_global_types(
     person_id: str,
     cell_id: str,
     cell: Cell,
@@ -151,14 +237,20 @@ def _available_relational_types(
     occupied_cells: set[str],
     rows: int,
     cols: int,
+    used_on_own_cell: set[str],
 ) -> list[str]:
-    """Que tipos de pista relacional son ciertos AHORA MISMO para esta
-    persona, dada la colocacion ya completa de todo el mundo.
+    """Que tipos "globales" son ciertos AHORA MISMO para esta persona, dada
+    la colocacion ya completa de todo el mundo (relacionales, que dependen
+    de otras personas) o el estado de los objetos ya colocados hasta ahora
+    (unique_object_on).
 
     A diferencia de area/object_on/object_adjacent (siempre se pueden
     forzar colocando un objeto), estos dependen de si la geometria y la
     colocacion ya dan la casualidad de que son ciertos -- por eso hace
-    falta comprobar disponibilidad antes de elegir uno.
+    falta comprobar disponibilidad antes de elegir uno. Tambien son los
+    que no se pueden podar temprano al comprobar unicidad, por eso se
+    limitan con `num_relational_people` en vez de ofrecerse a todo el
+    mundo.
     """
     types = []
 
@@ -177,6 +269,8 @@ def _available_relational_types(
         types.append("with_person")
     if people_south_of:
         types.append("relative_to_person")
+    if any(obj not in used_on_own_cell for obj in NON_BLOCKING_OBJECTS):
+        types.append("unique_object_on")
 
     return types
 
@@ -218,6 +312,16 @@ def assign_clues_and_objects(
     cells = {cell_id: cell.model_copy(deep=True) for cell_id, cell in cells.items()}
     occupied_cells = set(placement.values())
     clues: dict[str, dict] = {}
+    area_names = sorted({cell.area for cell in cells.values() if cell.area is not None})
+    # objetos ya colocados en la celda PROPIA de alguien (object_on o
+    # unique_object_on) -- unique_object_on necesita saber esto para no
+    # elegir un objeto que ya deje de ser unico.
+    used_on_own_cell: set[str] = set()
+    # objetos que una pista negada en OTRA persona necesita que no
+    # aparezcan en ningun sitio del tablero a partir de ahora (si no, una
+    # colocacion posterior podria colarse justo donde esa pista dice que
+    # NO deberia haber nada). Ver _make_negated_object_adjacent_clause.
+    globally_banned_objects: set[str] = set()
 
     person_ids = list(placement.keys())
     relational_eligible = set(
@@ -228,10 +332,14 @@ def assign_clues_and_objects(
         cell = cells[cell_id]
         row, _ = parse_cell_id(cell_id)
 
-        available_types = ["area", "object_on", "object_adjacent"]
+        available_types = [
+            "area", "object_on", "object_adjacent", "absolute_position",
+            "any_area", "negated_object_adjacent",
+        ]
         if person_id in relational_eligible:
-            available_types += _available_relational_types(
-                person_id, cell_id, cell, cells, placement, occupied_cells, rows, cols
+            available_types += _available_global_types(
+                person_id, cell_id, cell, cells, placement, occupied_cells,
+                rows, cols, used_on_own_cell,
             )
         chosen_types = rng.sample(available_types, min(num_clues, len(available_types)))
 
@@ -240,11 +348,28 @@ def assign_clues_and_objects(
             if clue_type == "area":
                 clauses.append(_make_area_clause(cell))
             elif clue_type == "object_on":
-                clauses.append(_make_object_on_clause(cell, rng))
+                clause = _make_object_on_clause(
+                    cell, rng, forbidden=used_on_own_cell | globally_banned_objects
+                )
+                if clause is not None:
+                    used_on_own_cell.add(clause["object"])
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "object_adjacent":
                 clause = _make_object_adjacent_clause(
-                    cell_id, cells, occupied_cells, rows, cols, rng
+                    cell_id, cells, occupied_cells, rows, cols, rng,
+                    forbidden=globally_banned_objects,
                 )
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "absolute_position":
+                clause = _make_absolute_position_clause(cell_id, cell, cells, rng)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "any_area":
+                clause = _make_any_area_clause(cell, area_names, rng)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "negated_object_adjacent":
+                clause = _make_negated_object_adjacent_clause(cell_id, cells, rows, cols, rng)
+                if clause is not None:
+                    globally_banned_objects.add(clause["object"])
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "empty_neighbor":
                 clauses.append({"type": "empty_neighbor"})
@@ -258,10 +383,24 @@ def assign_clues_and_objects(
                 clauses.append(
                     {"type": "relative_to_person", "reference": reference, "direction": "south"}
                 )
+            elif clue_type == "unique_object_on":
+                clause = _make_unique_object_on_clause(
+                    cell, used_on_own_cell, rng, forbidden=globally_banned_objects
+                )
+                if clause is not None:
+                    used_on_own_cell.add(clause["object"])
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
 
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
     return cells, clues
+
+
+def _negate_sentence(text: str) -> str:
+    """"Estaba junto a una mesa." -> "No estaba junto a una mesa." """
+    if text.startswith("Estaba "):
+        return "No estaba " + text[len("Estaba ") :]
+    return "No " + text[0].lower() + text[1:]
 
 
 def render_clue_template(structured: dict) -> str:
@@ -273,7 +412,21 @@ def render_clue_template(structured: dict) -> str:
     clue_type = structured.get("type")
 
     if clue_type == "all":
-        return " ".join(render_clue_template(clause) for clause in structured.get("clauses", []))
+        parts = []
+        for clause in structured.get("clauses", []):
+            text = render_clue_template(clause)
+            parts.append(_negate_sentence(text) if clause.get("negate") else text)
+        return " ".join(parts)
+
+    if clue_type == "any":
+        clauses = structured.get("clauses", [])
+        if len(clauses) == 2 and all(c.get("type") == "area" and not c.get("negate") for c in clauses):
+            return f"Estaba en la sala {clauses[0]['area']} o en la sala {clauses[1]['area']}."
+        parts = []
+        for clause in clauses:
+            text = render_clue_template(clause)
+            parts.append(_negate_sentence(text) if clause.get("negate") else text)
+        return " O bien: ".join(parts)
 
     if clue_type == "area":
         return f"Estaba en la sala {structured['area']}."
@@ -281,8 +434,19 @@ def render_clue_template(structured: dict) -> str:
     if clue_type == "object_on":
         return f"Estaba sobre una {structured['object']}."
 
+    if clue_type == "unique_object_on":
+        return f"Era la unica persona sobre una {structured['object']}."
+
     if clue_type == "object_adjacent":
         return f"Estaba junto a una {structured['object']}."
+
+    if clue_type == "absolute_position":
+        position = structured.get("position")
+        if position == "corner":
+            return "Estaba en una esquina de su sala."
+        if position == "last_column":
+            return "Estaba en la ultima columna de su sala."
+        raise ValueError(f"no hay plantilla para absolute_position: {position!r}")
 
     if clue_type == "empty_neighbor":
         return "Habia una celda vacia justo a su lado."
@@ -348,16 +512,32 @@ def _partial_eval(
     informacion para decidir (p.ej. una referencia a alguien que aun no
     tiene celda). Esto es lo que permite podar una pista relacional en
     cuanto se puede, en vez de esperar siempre a que este todo colocado.
+
+    Envoltorio fino sobre `_partial_eval_positive`, igual que
+    `clue_holds`/`evaluate_clue_positive` en el verificador: calcula el
+    resultado en positivo y lo invierte una sola vez si `structured`
+    lleva "negate" (sea pista suelta o clausula dentro de un "all"/"any").
     """
+    result = _partial_eval_positive(structured, person_id, cell_id, puzzle, assignment)
+    if structured.get("negate") and result is not None:
+        return not result
+    return result
+
+
+def _partial_eval_positive(
+    structured: dict,
+    person_id: str,
+    cell_id: str,
+    puzzle: Puzzle,
+    assignment: dict[str, str],
+) -> bool | None:
     clue_type = structured.get("type")
 
     if clue_type in ("all", "any"):
-        results = []
-        for clause in structured.get("clauses", []):
-            result = _partial_eval(clause, person_id, cell_id, puzzle, assignment)
-            if clause.get("negate") and result is not None:
-                result = not result
-            results.append(result)
+        results = [
+            _partial_eval(clause, person_id, cell_id, puzzle, assignment)
+            for clause in structured.get("clauses", [])
+        ]
 
         if clue_type == "all":
             if any(r is False for r in results):
@@ -372,10 +552,10 @@ def _partial_eval(
     if clue_type in _SINGLE_REFERENCE_TYPES:
         if structured.get("reference") not in assignment:
             return None
-        return clue_holds(structured, person_id, cell_id, puzzle, assignment)
+        return evaluate_clue_positive(structured, person_id, cell_id, puzzle, assignment)
 
     if clue_type in _ROW_LOCAL_TYPES:
-        return clue_holds(structured, person_id, cell_id, puzzle, assignment)
+        return evaluate_clue_positive(structured, person_id, cell_id, puzzle, assignment)
 
     # Tipos "globales" (relational_person/alone, relational_attribute,
     # unique_object_on, empty_neighbor...): dependen de quien mas pueda
@@ -468,7 +648,7 @@ def find_all_solutions(
     return solutions
 
 
-def has_unique_solution(puzzle: Puzzle, max_nodes: int = 300_000) -> bool:
+def has_unique_solution(puzzle: Puzzle, max_nodes: int = 100_000) -> bool:
     try:
         return len(find_all_solutions(puzzle, max_solutions=2, max_nodes=max_nodes)) == 1
     except SearchBudgetExceeded:
@@ -575,8 +755,8 @@ def generate_puzzle(
 DIFFICULTY_TIERS = {
     "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 2, "num_relational_people": 2},
     "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2, "num_relational_people": 2},
-    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 3, "num_relational_people": 8},
-    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 3, "num_relational_people": 9},
+    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 4, "num_relational_people": 3},
+    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 4, "num_relational_people": 3},
 }
 
 
