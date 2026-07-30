@@ -489,7 +489,7 @@ def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
 # geometria estatica del tablero) -- nunca de donde esta colocada otra
 # persona. Siempre se pueden evaluar del todo en cuanto se coloca a esa
 # persona.
-_ROW_LOCAL_TYPES = {"area", "object_on", "object_adjacent", "absolute_position"}
+ROW_LOCAL_CLUE_TYPES = {"area", "object_on", "object_adjacent", "absolute_position"}
 
 # Tipos que dependen de una persona concreta, nombrada por id. Se pueden
 # evaluar en cuanto ESA persona (no falta que este todo el mundo) ya
@@ -554,7 +554,7 @@ def _partial_eval_positive(
             return None
         return evaluate_clue_positive(structured, person_id, cell_id, puzzle, assignment)
 
-    if clue_type in _ROW_LOCAL_TYPES:
+    if clue_type in ROW_LOCAL_CLUE_TYPES:
         return evaluate_clue_positive(structured, person_id, cell_id, puzzle, assignment)
 
     # Tipos "globales" (relational_person/alone, relational_attribute,
