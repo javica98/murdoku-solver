@@ -381,6 +381,27 @@ __ROOM_DARK_VARS__
     text-transform: uppercase;
   }
 
+  .cell .forbidden-mark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1;
+    width: 46%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    border: 2.5px solid var(--bad);
+    background: linear-gradient(
+      to top right,
+      transparent calc(50% - 1.5px),
+      var(--bad) calc(50% - 1.5px),
+      var(--bad) calc(50% + 1.5px),
+      transparent calc(50% + 1.5px)
+    );
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
 __ROOM_CLASSES__
 
   .legend {
@@ -559,6 +580,7 @@ __ROOM_CLASSES__
       <div class="mode-toggle" role="group" aria-label="Modo de interaccion">
         <button id="mode-place-btn" class="mode-btn" type="button">Colocar</button>
         <button id="mode-note-btn" class="mode-btn" type="button">Anotar</button>
+        <button id="mode-forbid-btn" class="mode-btn" type="button">Prohibir</button>
       </div>
 
       <p class="hint" id="hint"></p>
@@ -594,8 +616,9 @@ __ROOM_CLASSES__
 
   const placements = {};
   const notes = {}; // cellId -> Set(personId) -- candidatos anotados, no comprometidos
+  const forbidden = new Set(); // cellIds marcadas "aqui no puede haber nadie"
   let armed = null;
-  let mode = "place"; // "place" | "note"
+  let mode = "place"; // "place" | "note" | "forbid"
 
   const victim = PUZZLE.people.find((p) => p.role === "victim");
   const suspects = PUZZLE.people.filter((p) => p.role === "suspect");
@@ -652,6 +675,7 @@ __ROOM_CLASSES__
     }
     syncOccupants();
     syncNotes();
+    syncForbidden();
   }
 
   function syncOccupants() {
@@ -702,14 +726,39 @@ __ROOM_CLASSES__
     syncNotes();
   }
 
+  function syncForbidden() {
+    document.querySelectorAll(".cell .forbidden-mark").forEach((el) => el.remove());
+    const occupiedCells = new Set(Object.values(placements));
+    forbidden.forEach((cellId) => {
+      if (occupiedCells.has(cellId)) return; // hay alguien colocado ahi, no tiene sentido mostrarla
+      const cellDiv = cellEl(cellId);
+      if (!cellDiv) return;
+      const mark = document.createElement("span");
+      mark.className = "forbidden-mark";
+      cellDiv.appendChild(mark);
+    });
+  }
+
+  function toggleForbidden(cellId) {
+    if (forbidden.has(cellId)) {
+      forbidden.delete(cellId);
+    } else {
+      forbidden.add(cellId);
+    }
+    syncForbidden();
+  }
+
   function setMode(newMode) {
     mode = newMode;
     document.getElementById("mode-place-btn").classList.toggle("active", mode === "place");
     document.getElementById("mode-note-btn").classList.toggle("active", mode === "note");
-    document.getElementById("hint").textContent =
-      mode === "place"
-        ? 'Modo Colocar: toca el nombre de un testigo para "armarlo", luego toca una casilla para situarlo ahi.'
-        : "Modo Anotar: arma a un testigo y toca todas las casillas donde creas que podria estar. No cuenta como solucion.";
+    document.getElementById("mode-forbid-btn").classList.toggle("active", mode === "forbid");
+    const hints = {
+      place: 'Modo Colocar: toca el nombre de un testigo para "armarlo", luego toca una casilla para situarlo ahi.',
+      note: "Modo Anotar: arma a un testigo y toca todas las casillas donde creas que podria estar. No cuenta como solucion.",
+      forbid: "Modo Prohibir: toca una casilla para marcar que ahi no puede haber nadie. No cuenta como solucion.",
+    };
+    document.getElementById("hint").textContent = hints[mode];
   }
 
   function renderWitnesses() {
@@ -753,12 +802,18 @@ __ROOM_CLASSES__
       return;
     }
 
+    if (mode === "forbid") {
+      toggleForbidden(cellId);
+      return;
+    }
+
     const occupantId = Object.keys(placements).find((p) => placements[p] === cellId);
 
     if (occupantId && !armed) {
       delete placements[occupantId];
       syncOccupants();
       syncNotes();
+      syncForbidden();
       syncWitnessCards();
       return;
     }
@@ -772,6 +827,7 @@ __ROOM_CLASSES__
     clearNotesFor(armed);
     armed = null;
     syncOccupants();
+    syncForbidden();
     syncWitnessCards();
     verdictEl.textContent = "";
     verdictEl.className = "";
@@ -812,6 +868,7 @@ __ROOM_CLASSES__
   function reset() {
     Object.keys(placements).forEach((k) => delete placements[k]);
     Object.keys(notes).forEach((k) => delete notes[k]);
+    forbidden.clear();
     armed = null;
     verdictEl.textContent = "";
     verdictEl.className = "";
@@ -819,17 +876,20 @@ __ROOM_CLASSES__
     witnessesEl.querySelectorAll(".witness.culprit").forEach((el) => el.classList.remove("culprit"));
     syncOccupants();
     syncNotes();
+    syncForbidden();
     syncWitnessCards();
   }
 
   function reveal() {
     Object.keys(placements).forEach((k) => delete placements[k]);
     Object.keys(notes).forEach((k) => delete notes[k]);
+    forbidden.clear();
     Object.entries(PUZZLE.solution).forEach(([id, cell]) => {
       if (id !== victim.id) placements[id] = cell;
     });
     syncOccupants();
     syncNotes();
+    syncForbidden();
     syncWitnessCards();
     verify();
   }
@@ -839,6 +899,7 @@ __ROOM_CLASSES__
   document.getElementById("reveal-btn").addEventListener("click", reveal);
   document.getElementById("mode-place-btn").addEventListener("click", () => setMode("place"));
   document.getElementById("mode-note-btn").addEventListener("click", () => setMode("note"));
+  document.getElementById("mode-forbid-btn").addEventListener("click", () => setMode("forbid"));
 
   renderGrid();
   renderWitnesses();

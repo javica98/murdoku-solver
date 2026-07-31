@@ -160,3 +160,10 @@ def test_render_includes_note_mode_controls():
     assert 'id="mode-note-btn"' in html
     assert "toggleNote" in html
     assert "clearNotesFor" in html
+
+
+def test_render_includes_forbid_mode_controls():
+    html = render_puzzle_html(_playable_puzzle())
+    assert 'id="mode-forbid-btn"' in html
+    assert "toggleForbidden" in html
+    assert "forbidden-mark" in html
