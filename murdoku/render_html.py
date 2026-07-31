@@ -1,7 +1,7 @@
 import json
 
 from murdoku.schema import Puzzle
-from murdoku.verifier import identify_murderer
+from murdoku.verifier import identify_murderer, parse_cell_id
 
 _STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "en"}
 
@@ -52,6 +52,31 @@ def _room_css_vars(palette: list[dict], indent: str) -> str:
     )
 
 
+def _room_borders(puzzle: Puzzle) -> dict[str, dict[str, bool]]:
+    """Para cada celda, que lados tocan una celda de OTRA area (o el borde
+    del tablero). Esos lados se pintan como pared en el plano -- asi las
+    salas se distinguen por su silueta real, no solo por el color.
+    """
+    rows, cols = puzzle.grid.rows, puzzle.grid.cols
+
+    def area_at(r: int, c: int) -> str | None:
+        if not (0 <= r < rows and 0 <= c < cols):
+            return None
+        cell = puzzle.cells.get(f"r{r}c{c}")
+        return cell.area if cell else None
+
+    borders = {}
+    for cell_id, cell in puzzle.cells.items():
+        r, c = parse_cell_id(cell_id)
+        borders[cell_id] = {
+            "top": area_at(r - 1, c) != cell.area,
+            "right": area_at(r, c + 1) != cell.area,
+            "bottom": area_at(r + 1, c) != cell.area,
+            "left": area_at(r, c - 1) != cell.area,
+        }
+    return borders
+
+
 def _room_css_classes() -> str:
     return "\n".join(
         f"  .room-idx-{i} {{ background: var(--room-{i}-bg); color: var(--room-{i}-ink); }}"
@@ -83,6 +108,7 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
 
     area_keys = sorted(puzzle.areas.keys())
     room_index = {area: i % len(_ROOM_PALETTE_LIGHT) for i, area in enumerate(area_keys)}
+    borders = _room_borders(puzzle)
 
     data = {
         "scenario": puzzle.scenario,
@@ -92,7 +118,12 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
         "areas": {name: _humanize_area(name) for name in area_keys},
         "roomIndex": room_index,
         "cells": {
-            cell_id: {"area": cell.area, "objects": cell.objects, "blocked": cell.blocked}
+            cell_id: {
+                "area": cell.area,
+                "objects": cell.objects,
+                "blocked": cell.blocked,
+                "borders": borders[cell_id],
+            }
             for cell_id, cell in puzzle.cells.items()
         },
         "people": [
@@ -254,10 +285,8 @@ __ROOM_DARK_VARS__
 
   .grid {
     display: grid;
-    gap: 3px;
-    background: var(--line);
-    padding: 3px;
-    border-radius: 4px;
+    gap: 0;
+    border: 3px solid var(--ink);
     aspect-ratio: 1;
   }
 
@@ -269,12 +298,17 @@ __ROOM_DARK_VARS__
     font-family: var(--font-mono);
     font-size: clamp(0.6rem, 1.6vw, 0.82rem);
     font-weight: 700;
-    border-radius: 2px;
     cursor: pointer;
     user-select: none;
     transition: filter 0.12s ease, transform 0.08s ease;
     overflow: hidden;
+    border: 1px solid rgba(0,0,0,0.08);
   }
+
+  .cell.wall-top { border-top: 3px solid var(--ink); }
+  .cell.wall-right { border-right: 3px solid var(--ink); }
+  .cell.wall-bottom { border-bottom: 3px solid var(--ink); }
+  .cell.wall-left { border-left: 3px solid var(--ink); }
 
   .cell:hover { filter: brightness(1.08); }
   .cell:active { transform: scale(0.96); }
@@ -284,23 +318,34 @@ __ROOM_DARK_VARS__
     content: "";
     position: absolute;
     inset: 0;
+    z-index: 1;
     background: repeating-linear-gradient(45deg, var(--blocked-hatch) 0 6px, transparent 6px 12px);
   }
 
   .cell .obj-label {
     position: absolute;
-    bottom: 2px;
-    left: 3px;
-    font-size: 0.52rem;
-    font-weight: 400;
-    letter-spacing: 0.02em;
-    opacity: 0.75;
-    text-transform: lowercase;
+    inset: 0;
+    z-index: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0.3rem;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: clamp(0.56rem, 2.4vw, 0.9rem);
+    letter-spacing: 0.03em;
+    line-height: 1.15;
+    text-transform: uppercase;
+    color: currentColor;
+    opacity: 0.55;
+    pointer-events: none;
+    word-break: break-word;
   }
 
   .cell .occupant {
     position: relative;
-    z-index: 1;
+    z-index: 2;
     padding: 0.15rem 0.35rem;
     border-radius: 3px;
     background: var(--paper);
@@ -519,14 +564,19 @@ __ROOM_CLASSES__
         const cellId = "r" + r + "c" + c;
         const cell = PUZZLE.cells[cellId];
         const div = document.createElement("div");
-        div.className = "cell " + roomClass(cell.area) + (cell.blocked ? " blocked" : "");
+        let className = "cell " + roomClass(cell.area) + (cell.blocked ? " blocked" : "");
+        if (cell.borders.top) className += " wall-top";
+        if (cell.borders.right) className += " wall-right";
+        if (cell.borders.bottom) className += " wall-bottom";
+        if (cell.borders.left) className += " wall-left";
+        div.className = className;
         div.dataset.cell = cellId;
         div.tabIndex = cell.blocked ? -1 : 0;
 
         if (cell.objects.length) {
           const label = document.createElement("span");
           label.className = "obj-label";
-          label.textContent = cell.objects.join(", ");
+          label.textContent = cell.objects.join(" · ");
           div.appendChild(label);
         }
 

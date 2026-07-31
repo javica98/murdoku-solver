@@ -1,6 +1,6 @@
 import pytest
 
-from murdoku.render_html import _humanize_area, render_puzzle_html
+from murdoku.render_html import _humanize_area, _room_borders, render_puzzle_html
 from murdoku.schema import Cell, Clue, Grid, Person, Puzzle
 
 
@@ -76,6 +76,50 @@ def test_render_includes_murderer_and_murder_room():
     html = render_puzzle_html(_playable_puzzle())
     assert '"murderer": "Ada"' in html
     assert '"murderRoom": "Salon"' in html
+
+
+def _two_room_puzzle() -> Puzzle:
+    # columna izquierda = area A, columna derecha = area B.
+    return Puzzle(
+        id="borders_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=2, cols=2),
+        areas={"A": ["r0c0", "r1c0"], "B": ["r0c1", "r1c1"]},
+        cells={
+            "r0c0": Cell(area="A"),
+            "r0c1": Cell(area="B"),
+            "r1c0": Cell(area="A"),
+            "r1c1": Cell(area="B"),
+        },
+        people=[
+            Person(id="Ada", role="suspect", clue=Clue(text="...", structured={"type": "area", "area": "B"})),
+            Person(id="Bruno", role="victim"),
+        ],
+        # Ada y Bruno comparten area B, para que haya asesino identificable.
+        solution={"Ada": "r0c1", "Bruno": "r1c1"},
+    )
+
+
+def test_room_borders_marks_board_edges():
+    borders = _room_borders(_two_room_puzzle())
+    assert borders["r0c0"]["top"] is True
+    assert borders["r0c0"]["left"] is True
+
+
+def test_room_borders_marks_area_boundary_but_not_same_area_seam():
+    borders = _room_borders(_two_room_puzzle())
+    # r0c0 (A) y r0c1 (B) son vecinos de distinta area -> pared entre ellas.
+    assert borders["r0c0"]["right"] is True
+    assert borders["r0c1"]["left"] is True
+    # r0c0 (A) y r1c0 (A) son la misma area -> sin pared.
+    assert borders["r0c0"]["bottom"] is False
+    assert borders["r1c0"]["top"] is False
+
+
+def test_render_includes_wall_border_data():
+    html = render_puzzle_html(_two_room_puzzle())
+    assert '"borders"' in html
 
 
 def test_render_includes_scenario_and_case_id():
