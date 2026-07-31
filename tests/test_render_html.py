@@ -167,3 +167,12 @@ def test_render_includes_forbid_mode_controls():
     assert 'id="mode-forbid-btn"' in html
     assert "toggleForbidden" in html
     assert "forbidden-mark" in html
+
+
+def test_render_makes_the_victim_placeable_like_a_witness():
+    html = render_puzzle_html(_playable_puzzle())
+    assert 'id="victim-card"' in html
+    assert "armPerson(victim.id)" in html
+    # el total a colocar (para "Faltan N personas" y el veredicto) debe
+    # incluir a la victima, no solo a los sospechosos.
+    assert "const placeable = PUZZLE.people;" in html

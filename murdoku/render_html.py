@@ -426,7 +426,14 @@ __ROOM_CLASSES__
     border-radius: 6px;
     padding: 0.85rem 1.05rem;
     box-shadow: var(--shadow);
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.12s ease, transform 0.08s ease, opacity 0.12s ease;
   }
+
+  .victim-card:hover { transform: translateX(2px); }
+  .victim-card.armed { border-color: var(--ink); }
+  .victim-card.placed { opacity: 0.75; }
 
   .victim-card .role {
     font-family: var(--font-mono);
@@ -437,11 +444,31 @@ __ROOM_CLASSES__
     margin: 0 0 0.2rem;
   }
 
+  .victim-card .head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+  }
+
   .victim-card .name {
     font-family: var(--font-mono);
     font-weight: 700;
     font-size: 1.05rem;
     margin: 0;
+  }
+
+  .victim-card .loc {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    opacity: 0.85;
+  }
+
+  .victim-card .note {
+    margin: 0.35rem 0 0;
+    font-size: 0.8rem;
+    font-style: italic;
+    opacity: 0.9;
   }
 
   .witnesses { display: flex; flex-direction: column; gap: 0.55rem; }
@@ -570,9 +597,13 @@ __ROOM_CLASSES__
     </section>
 
     <section class="file-panel">
-      <div class="victim-card">
+      <div class="victim-card" id="victim-card" tabindex="0">
         <p class="role">Victima</p>
-        <p class="name" id="victim-name"></p>
+        <div class="head">
+          <p class="name" id="victim-name"></p>
+          <span class="loc" id="victim-loc"></span>
+        </div>
+        <p class="note">Su sitio no tiene pista propia: se descubre por descarte, al colocar bien a todos los demas.</p>
       </div>
 
       <div class="witnesses" id="witnesses"></div>
@@ -622,7 +653,14 @@ __ROOM_CLASSES__
 
   const victim = PUZZLE.people.find((p) => p.role === "victim");
   const suspects = PUZZLE.people.filter((p) => p.role === "suspect");
+  const placeable = PUZZLE.people; // todos, victima incluida: tambien hay que colocarla
   victimNameEl.textContent = victim.id;
+  const victimCardEl = document.getElementById("victim-card");
+  victimCardEl.dataset.person = victim.id;
+  victimCardEl.addEventListener("click", () => armPerson(victim.id));
+  victimCardEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); armPerson(victim.id); }
+  });
 
   const roomClass = (area) => "room-idx-" + PUZZLE.roomIndex[area];
 
@@ -774,13 +812,13 @@ __ROOM_CLASSES__
           '<span class="witness-loc"></span>' +
         "</div>" +
         '<div class="witness-statement">"' + person.clue + '"</div>';
-      card.addEventListener("click", () => armWitness(person.id));
+      card.addEventListener("click", () => armPerson(person.id));
       witnessesEl.appendChild(card);
     });
-    syncWitnessCards();
+    syncPersonCards();
   }
 
-  function syncWitnessCards() {
+  function syncPersonCards() {
     witnessesEl.querySelectorAll(".witness").forEach((card) => {
       const id = card.dataset.person;
       card.classList.toggle("armed", armed === id);
@@ -788,11 +826,16 @@ __ROOM_CLASSES__
       card.classList.toggle("placed", Boolean(placedAt));
       card.querySelector(".witness-loc").textContent = placedAt ? placedAt : "";
     });
+
+    const placedAt = placements[victim.id];
+    victimCardEl.classList.toggle("armed", armed === victim.id);
+    victimCardEl.classList.toggle("placed", Boolean(placedAt));
+    document.getElementById("victim-loc").textContent = placedAt ? placedAt : "";
   }
 
-  function armWitness(personId) {
+  function armPerson(personId) {
     armed = armed === personId ? null : personId;
-    syncWitnessCards();
+    syncPersonCards();
   }
 
   function onCellClick(cellId) {
@@ -814,7 +857,7 @@ __ROOM_CLASSES__
       syncOccupants();
       syncNotes();
       syncForbidden();
-      syncWitnessCards();
+      syncPersonCards();
       return;
     }
 
@@ -828,15 +871,15 @@ __ROOM_CLASSES__
     armed = null;
     syncOccupants();
     syncForbidden();
-    syncWitnessCards();
+    syncPersonCards();
     verdictEl.textContent = "";
     verdictEl.className = "";
   }
 
   function verify() {
-    const total = suspects.length;
+    const total = placeable.length;
     let correct = 0;
-    suspects.forEach((p) => {
+    placeable.forEach((p) => {
       if (!placements[p.id]) return;
       const div = cellEl(placements[p.id]);
       if (placements[p.id] === PUZZLE.solution[p.id]) {
@@ -848,11 +891,11 @@ __ROOM_CLASSES__
     });
 
     if (Object.keys(placements).length < total) {
-      verdictEl.textContent = "Faltan " + (total - Object.keys(placements).length) + " testigos por colocar.";
+      verdictEl.textContent = "Faltan " + (total - Object.keys(placements).length) + " personas por colocar.";
       verdictEl.className = "";
     } else if (correct === total) {
       verdictEl.innerHTML =
-        "Caso resuelto — los " + total + " testigos están en su sitio.<br>" +
+        "Caso resuelto — las " + total + " personas están en su sitio.<br>" +
         "El asesino es <b>" + PUZZLE.murderer + "</b>: estaba a solas con " +
         victim.id + " en " + PUZZLE.murderRoom + ".";
       verdictEl.className = "good";
@@ -877,7 +920,7 @@ __ROOM_CLASSES__
     syncOccupants();
     syncNotes();
     syncForbidden();
-    syncWitnessCards();
+    syncPersonCards();
   }
 
   function reveal() {
@@ -885,12 +928,12 @@ __ROOM_CLASSES__
     Object.keys(notes).forEach((k) => delete notes[k]);
     forbidden.clear();
     Object.entries(PUZZLE.solution).forEach(([id, cell]) => {
-      if (id !== victim.id) placements[id] = cell;
+      placements[id] = cell;
     });
     syncOccupants();
     syncNotes();
     syncForbidden();
-    syncWitnessCards();
+    syncPersonCards();
     verify();
   }
 
