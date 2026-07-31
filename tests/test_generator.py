@@ -123,6 +123,32 @@ def test_connectivity_holds_across_many_random_seeds(seed):
         assert _is_connected(cell_ids), f"seed={seed}: area {area} disconnected"
 
 
+def _has_isolated_cell(cells: dict) -> bool:
+    for cell_id, cell in cells.items():
+        row, col = int(cell_id[1:cell_id.index("c")]), int(cell_id[cell_id.index("c") + 1 :])
+        neighbor_ids = [
+            f"r{row - 1}c{col}", f"r{row + 1}c{col}", f"r{row}c{col - 1}", f"r{row}c{col + 1}",
+        ]
+        neighbor_areas = {cells[n].area for n in neighbor_ids if n in cells}
+        if cell.area not in neighbor_areas:
+            return True
+    return False
+
+
+def test_no_room_has_a_single_cell_island():
+    # una celda sin NINGUN vecino de su misma sala se ve como un error de
+    # transcripcion en el plano jugable (lo encontramos a mano en un
+    # puzzle real: una celda "aislada" en medio de otra sala).
+    cells = generate_rooms(9, 9, ["A", "B", "C", "D", "E"], rng=random.Random(7))
+    assert not _has_isolated_cell(cells)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_no_isolated_cells_across_many_random_seeds(seed):
+    cells = generate_rooms(7, 7, ["A", "B", "C", "D", "E"], rng=random.Random(seed))
+    assert not _has_isolated_cell(cells), f"seed={seed}: found an isolated cell"
+
+
 def _build_puzzle(rows: int, cols: int, cells: dict, placement: dict, clues: dict) -> Puzzle:
     areas: dict = {}
     for cell_id, cell in cells.items():

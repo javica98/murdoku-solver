@@ -16,14 +16,34 @@ def _orthogonal_neighbor_ids(cell_id: str, rows: int, cols: int) -> list[str]:
     return [f"r{r}c{c}" for r, c in candidates if 0 <= r < rows and 0 <= c < cols]
 
 
+def _has_isolated_cell(cell_area: dict[str, str], rows: int, cols: int) -> bool:
+    """True si alguna celda no tiene NINGUN vecino ortogonal de su misma
+    sala -- una isla de una sola celda, que no tiene sentido como plano
+    de una habitacion real (encontramos justo este caso a mano en un
+    puzzle transcrito: una celda "aislada" en medio de otra sala).
+    """
+    for cell_id, area in cell_area.items():
+        neighbor_areas = {cell_area[n] for n in _orthogonal_neighbor_ids(cell_id, rows, cols)}
+        if area not in neighbor_areas:
+            return True
+    return False
+
+
 def generate_rooms(
-    rows: int, cols: int, area_names: list[str], rng: random.Random | None = None
+    rows: int,
+    cols: int,
+    area_names: list[str],
+    rng: random.Random | None = None,
+    max_attempts: int = 200,
 ) -> dict[str, Cell]:
     """Reparte todas las celdas de la rejilla entre las salas dadas.
 
     Usa un crecimiento por inundacion aleatorio: cada sala parte de una
     celda semilla y, en cada ronda, reclama una celda vecina libre al azar.
-    Esto garantiza que cada sala quede como una unica pieza conectada.
+    Esto garantiza que cada sala quede como una unica pieza conectada --
+    pero la semilla de una sala puede quedar aislada si sus vecinos los
+    reclaman otras salas antes de que le toque turno, asi que se reintenta
+    con semillas nuevas hasta que ninguna celda quede sin vecino propio.
     """
     if rng is None:
         rng = random.Random()
@@ -32,32 +52,38 @@ def generate_rooms(
     if len(area_names) > len(all_cell_ids):
         raise ValueError("more areas than cells")
 
-    seeds = rng.sample(all_cell_ids, len(area_names))
-    cell_area: dict[str, str] = dict(zip(seeds, area_names))
-    unclaimed = set(all_cell_ids) - set(cell_area)
+    for _ in range(max_attempts):
+        seeds = rng.sample(all_cell_ids, len(area_names))
+        cell_area: dict[str, str] = dict(zip(seeds, area_names))
+        unclaimed = set(all_cell_ids) - set(cell_area)
 
-    frontiers = {
-        area: set(_orthogonal_neighbor_ids(seed, rows, cols)) & unclaimed
-        for area, seed in zip(area_names, seeds)
-    }
+        frontiers = {
+            area: set(_orthogonal_neighbor_ids(seed, rows, cols)) & unclaimed
+            for area, seed in zip(area_names, seeds)
+        }
 
-    while unclaimed:
-        areas_order = area_names.copy()
-        rng.shuffle(areas_order)
-        for area in areas_order:
-            candidates = frontiers[area] & unclaimed
-            if not candidates:
-                continue
-            chosen = rng.choice(sorted(candidates))
-            cell_area[chosen] = area
-            unclaimed.discard(chosen)
-            frontiers[area].discard(chosen)
-            frontiers[area].update(set(_orthogonal_neighbor_ids(chosen, rows, cols)) & unclaimed)
+        while unclaimed:
+            areas_order = area_names.copy()
+            rng.shuffle(areas_order)
+            for area in areas_order:
+                candidates = frontiers[area] & unclaimed
+                if not candidates:
+                    continue
+                chosen = rng.choice(sorted(candidates))
+                cell_area[chosen] = area
+                unclaimed.discard(chosen)
+                frontiers[area].discard(chosen)
+                frontiers[area].update(set(_orthogonal_neighbor_ids(chosen, rows, cols)) & unclaimed)
 
-    return {
-        cell_id: Cell(area=area, objects=[], blocked=False)
-        for cell_id, area in cell_area.items()
-    }
+        if _has_isolated_cell(cell_area, rows, cols):
+            continue
+
+        return {
+            cell_id: Cell(area=area, objects=[], blocked=False)
+            for cell_id, area in cell_area.items()
+        }
+
+    raise RuntimeError(f"no se logro un reparto de salas sin celdas aisladas en {max_attempts} intentos")
 
 
 def generate_placement(
