@@ -1,6 +1,7 @@
 import json
 
 from murdoku.schema import Puzzle
+from murdoku.verifier import identify_murderer
 
 _STOPWORDS = {"de", "del", "la", "el", "los", "las", "y", "en"}
 
@@ -74,6 +75,12 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
     if victim is None:
         raise ValueError("el puzzle no tiene victima")
 
+    murderer_id = identify_murderer(puzzle, puzzle.solution)
+    if murderer_id is None:
+        raise ValueError("no se puede identificar un unico asesino en este puzzle")
+    murder_room = puzzle.cells[puzzle.solution[victim.id]].area
+    murder_room_label = _humanize_area(murder_room) if murder_room else ""
+
     area_keys = sorted(puzzle.areas.keys())
     room_index = {area: i % len(_ROOM_PALETTE_LIGHT) for i, area in enumerate(area_keys)}
 
@@ -97,6 +104,8 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
             for person in puzzle.people
         ],
         "solution": puzzle.solution,
+        "murderer": murderer_id,
+        "murderRoom": murder_room_label,
     }
     puzzle_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
@@ -359,6 +368,11 @@ __ROOM_CLASSES__
   .witness:hover { transform: translateX(2px); }
   .witness.armed { border-color: var(--accent); }
   .witness.placed { opacity: 0.6; }
+  .witness.culprit {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--paper-2));
+    opacity: 1;
+  }
 
   .witness-head {
     display: flex;
@@ -617,9 +631,14 @@ __ROOM_CLASSES__
       verdictEl.textContent = "Faltan " + (total - Object.keys(placements).length) + " testigos por colocar.";
       verdictEl.className = "";
     } else if (correct === total) {
-      verdictEl.textContent = "Caso resuelto — los " + total + " testigos están en su sitio.";
+      verdictEl.innerHTML =
+        "Caso resuelto — los " + total + " testigos están en su sitio.<br>" +
+        "El asesino es <b>" + PUZZLE.murderer + "</b>: estaba a solas con " +
+        victim.id + " en " + PUZZLE.murderRoom + ".";
       verdictEl.className = "good";
-      stampEl.textContent = "Caso resuelto";
+      stampEl.textContent = "Caso resuelto — el asesino es " + PUZZLE.murderer;
+      const culpritCard = witnessesEl.querySelector('[data-person="' + PUZZLE.murderer + '"]');
+      if (culpritCard) culpritCard.classList.add("culprit");
     } else {
       verdictEl.textContent = correct + " de " + total + " en el lugar correcto. Sigue investigando.";
       verdictEl.className = "bad";
@@ -632,6 +651,7 @@ __ROOM_CLASSES__
     verdictEl.textContent = "";
     verdictEl.className = "";
     stampEl.textContent = "Sin resolver";
+    witnessesEl.querySelectorAll(".witness.culprit").forEach((el) => el.classList.remove("culprit"));
     syncOccupants();
     syncWitnessCards();
   }

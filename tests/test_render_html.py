@@ -51,6 +51,33 @@ def test_render_raises_without_victim():
         render_puzzle_html(puzzle)
 
 
+def test_render_raises_without_identifiable_murderer():
+    # los dos sospechosos comparten sala con la victima -> no hay un
+    # unico asesino posible.
+    puzzle = Puzzle(
+        id="ambiguous_test",
+        scenario="Fiesta",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=3),
+        areas={"SALON": [f"r{r}c{c}" for r in range(3) for c in range(3)]},
+        cells={f"r{r}c{c}": Cell(area="SALON") for r in range(3) for c in range(3)},
+        people=[
+            Person(id="Ada", role="suspect", clue=Clue(text="...", structured={"type": "area", "area": "SALON"})),
+            Person(id="Carmen", role="suspect", clue=Clue(text="...", structured={"type": "area", "area": "SALON"})),
+            Person(id="Bruno", role="victim"),
+        ],
+        solution={"Ada": "r0c0", "Carmen": "r1c1", "Bruno": "r2c2"},
+    )
+    with pytest.raises(ValueError, match="asesino"):
+        render_puzzle_html(puzzle)
+
+
+def test_render_includes_murderer_and_murder_room():
+    html = render_puzzle_html(_playable_puzzle())
+    assert '"murderer": "Ada"' in html
+    assert '"murderRoom": "Salon"' in html
+
+
 def test_render_includes_scenario_and_case_id():
     html = render_puzzle_html(_playable_puzzle())
     assert "La cena de gala" in html
