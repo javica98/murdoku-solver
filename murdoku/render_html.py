@@ -356,6 +356,31 @@ __ROOM_DARK_VARS__
   .cell.correct .occupant { outline: 2px solid var(--good); }
   .cell.incorrect .occupant { outline: 2px solid var(--bad); }
 
+  .cell .notes {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    right: 2px;
+    z-index: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    pointer-events: none;
+  }
+
+  .cell .note-chip {
+    font-family: var(--font-mono);
+    font-size: 0.42rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+    padding: 0 0.22rem;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--paper) 80%, transparent);
+    color: var(--ink);
+    text-transform: uppercase;
+  }
+
 __ROOM_CLASSES__
 
   .legend {
@@ -444,6 +469,30 @@ __ROOM_CLASSES__
     letter-spacing: 0.02em;
   }
 
+  .mode-toggle { display: flex; gap: 0.4rem; }
+
+  .mode-btn {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 0.5rem 0.7rem;
+    border-radius: 4px;
+    border: 2px solid var(--line);
+    background: transparent;
+    color: var(--ink-dim);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .mode-btn.active {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+  }
+
   .controls { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 
   button {
@@ -507,7 +556,12 @@ __ROOM_CLASSES__
 
       <div class="witnesses" id="witnesses"></div>
 
-      <p class="hint">Toca el nombre de un testigo para "armarlo", luego toca una casilla libre del plano para colocarlo ahi.</p>
+      <div class="mode-toggle" role="group" aria-label="Modo de interaccion">
+        <button id="mode-place-btn" class="mode-btn" type="button">Colocar</button>
+        <button id="mode-note-btn" class="mode-btn" type="button">Anotar</button>
+      </div>
+
+      <p class="hint" id="hint"></p>
 
       <div class="controls">
         <button id="verify-btn">Verificar</button>
@@ -539,7 +593,9 @@ __ROOM_CLASSES__
   gridEl.style.gridTemplateRows = "repeat(" + PUZZLE.grid.rows + ", 1fr)";
 
   const placements = {};
+  const notes = {}; // cellId -> Set(personId) -- candidatos anotados, no comprometidos
   let armed = null;
+  let mode = "place"; // "place" | "note"
 
   const victim = PUZZLE.people.find((p) => p.role === "victim");
   const suspects = PUZZLE.people.filter((p) => p.role === "suspect");
@@ -580,6 +636,10 @@ __ROOM_CLASSES__
           div.appendChild(label);
         }
 
+        const notesEl = document.createElement("span");
+        notesEl.className = "notes";
+        div.appendChild(notesEl);
+
         if (!cell.blocked) {
           div.addEventListener("click", () => onCellClick(cellId));
           div.addEventListener("keydown", (e) => {
@@ -591,6 +651,7 @@ __ROOM_CLASSES__
       }
     }
     syncOccupants();
+    syncNotes();
   }
 
   function syncOccupants() {
@@ -604,6 +665,51 @@ __ROOM_CLASSES__
       occ.textContent = personId.slice(0, 3);
       div.appendChild(occ);
     });
+  }
+
+  function syncNotes() {
+    document.querySelectorAll(".cell .notes").forEach((el) => { el.innerHTML = ""; });
+    const occupiedCells = new Set(Object.values(placements));
+    Object.entries(notes).forEach(([cellId, personIds]) => {
+      if (occupiedCells.has(cellId)) return; // ya hay alguien colocado, no hace falta anotar
+      const container = gridEl.querySelector('[data-cell="' + cellId + '"] .notes');
+      if (!container) return;
+      [...personIds].sort().forEach((personId) => {
+        const chip = document.createElement("span");
+        chip.className = "note-chip";
+        chip.textContent = personId.slice(0, 3);
+        container.appendChild(chip);
+      });
+    });
+  }
+
+  function toggleNote(cellId, personId) {
+    const set = notes[cellId] || (notes[cellId] = new Set());
+    if (set.has(personId)) {
+      set.delete(personId);
+    } else {
+      set.add(personId);
+    }
+    if (set.size === 0) delete notes[cellId];
+    syncNotes();
+  }
+
+  function clearNotesFor(personId) {
+    Object.keys(notes).forEach((cellId) => {
+      notes[cellId].delete(personId);
+      if (notes[cellId].size === 0) delete notes[cellId];
+    });
+    syncNotes();
+  }
+
+  function setMode(newMode) {
+    mode = newMode;
+    document.getElementById("mode-place-btn").classList.toggle("active", mode === "place");
+    document.getElementById("mode-note-btn").classList.toggle("active", mode === "note");
+    document.getElementById("hint").textContent =
+      mode === "place"
+        ? 'Modo Colocar: toca el nombre de un testigo para "armarlo", luego toca una casilla para situarlo ahi.'
+        : "Modo Anotar: arma a un testigo y toca todas las casillas donde creas que podria estar. No cuenta como solucion.";
   }
 
   function renderWitnesses() {
@@ -641,11 +747,18 @@ __ROOM_CLASSES__
   }
 
   function onCellClick(cellId) {
+    if (mode === "note") {
+      if (!armed) return;
+      toggleNote(cellId, armed);
+      return;
+    }
+
     const occupantId = Object.keys(placements).find((p) => placements[p] === cellId);
 
     if (occupantId && !armed) {
       delete placements[occupantId];
       syncOccupants();
+      syncNotes();
       syncWitnessCards();
       return;
     }
@@ -656,6 +769,7 @@ __ROOM_CLASSES__
       if (placements[p] === cellId) delete placements[p];
     });
     placements[armed] = cellId;
+    clearNotesFor(armed);
     armed = null;
     syncOccupants();
     syncWitnessCards();
@@ -697,21 +811,25 @@ __ROOM_CLASSES__
 
   function reset() {
     Object.keys(placements).forEach((k) => delete placements[k]);
+    Object.keys(notes).forEach((k) => delete notes[k]);
     armed = null;
     verdictEl.textContent = "";
     verdictEl.className = "";
     stampEl.textContent = "Sin resolver";
     witnessesEl.querySelectorAll(".witness.culprit").forEach((el) => el.classList.remove("culprit"));
     syncOccupants();
+    syncNotes();
     syncWitnessCards();
   }
 
   function reveal() {
     Object.keys(placements).forEach((k) => delete placements[k]);
+    Object.keys(notes).forEach((k) => delete notes[k]);
     Object.entries(PUZZLE.solution).forEach(([id, cell]) => {
       if (id !== victim.id) placements[id] = cell;
     });
     syncOccupants();
+    syncNotes();
     syncWitnessCards();
     verify();
   }
@@ -719,9 +837,12 @@ __ROOM_CLASSES__
   document.getElementById("verify-btn").addEventListener("click", verify);
   document.getElementById("reset-btn").addEventListener("click", reset);
   document.getElementById("reveal-btn").addEventListener("click", reveal);
+  document.getElementById("mode-place-btn").addEventListener("click", () => setMode("place"));
+  document.getElementById("mode-note-btn").addEventListener("click", () => setMode("note"));
 
   renderGrid();
   renderWitnesses();
+  setMode("place");
 })();
 </script>
 """

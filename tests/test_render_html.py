@@ -152,3 +152,11 @@ def test_render_is_self_contained_html_fragment():
     assert "__PUZZLE_JSON__" not in html
     assert "__ROOM_LIGHT_VARS__" not in html
     assert "__ROOM_CLASSES__" not in html
+
+
+def test_render_includes_note_mode_controls():
+    html = render_puzzle_html(_playable_puzzle())
+    assert 'id="mode-place-btn"' in html
+    assert 'id="mode-note-btn"' in html
+    assert "toggleNote" in html
+    assert "clearNotesFor" in html
