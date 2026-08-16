@@ -416,6 +416,40 @@ def _make_relative_to_object_clause(
     return {"type": "relative_to_object", "object": obj, "direction": direction, "distance": distance}
 
 
+def _same_axis_candidates(cell_id: str, cells: dict[str, Cell]) -> list[tuple[str, str]]:
+    """(objeto, eje) candidatos para "misma fila/columna que X" -- solo
+    objetos unicos en todo el tablero (si no, seria ambiguo cual). Solo
+    tiene sentido anclado a un objeto: dos personas nunca comparten fila
+    ni columna entre si (regla base del juego).
+    """
+    row, col = parse_cell_id(cell_id)
+
+    cells_by_object: dict[str, list[str]] = {}
+    for other_cell_id, cell in cells.items():
+        for obj in cell.objects:
+            cells_by_object.setdefault(obj, []).append(other_cell_id)
+
+    candidates = []
+    for obj, cell_ids in cells_by_object.items():
+        if len(cell_ids) != 1:
+            continue
+        anchor_row, anchor_col = parse_cell_id(cell_ids[0])
+        if row == anchor_row:
+            candidates.append((obj, "row"))
+        if col == anchor_col:
+            candidates.append((obj, "col"))
+    return candidates
+
+
+def _make_same_axis_clause(cell_id: str, cells: dict[str, Cell], rng: random.Random) -> dict | None:
+    candidates = _same_axis_candidates(cell_id, cells)
+    if not candidates:
+        return None
+
+    obj, axis = rng.choice(candidates)
+    return {"type": "same_axis", "object": obj, "axis": axis}
+
+
 def _available_global_types(
     person_id: str,
     cell_id: str,
@@ -518,10 +552,11 @@ def assign_clues_and_objects(
     # colocacion posterior podria colarse justo donde esa pista dice que
     # NO deberia haber nada). Ver _make_negated_object_adjacent_clause.
     globally_banned_objects: set[str] = set()
-    # objetos que YA anclan una pista relative_to_object en curso -- si se
-    # colocara una segunda copia en otra celda, esa distancia dejaria de
-    # ser inequivoca. Ver _relative_to_object_candidates.
-    distance_anchor_objects: set[str] = set()
+    # objetos que YA anclan una pista relative_to_object o same_axis en
+    # curso -- si se colocara una segunda copia en otra celda, esa
+    # relacion dejaria de ser inequivoca. Ver _relative_to_object_candidates
+    # y _same_axis_candidates.
+    unique_anchor_objects: set[str] = set()
 
     person_ids = list(placement.keys())
     relational_eligible = set(
@@ -540,6 +575,8 @@ def assign_clues_and_objects(
         # falta limitarla con num_relational_people.
         if _relative_to_object_candidates(cell_id, cells):
             available_types.append("relative_to_object")
+        if _same_axis_candidates(cell_id, cells):
+            available_types.append("same_axis")
         if person_id in relational_eligible:
             available_types += _available_global_types(
                 person_id, cell_id, cell, cells, placement, occupied_cells,
@@ -554,7 +591,7 @@ def assign_clues_and_objects(
             elif clue_type == "object_on":
                 clause = _make_object_on_clause(
                     cell, rng,
-                    forbidden=used_on_own_cell | globally_banned_objects | distance_anchor_objects,
+                    forbidden=used_on_own_cell | globally_banned_objects | unique_anchor_objects,
                 )
                 if clause is not None:
                     used_on_own_cell.add(clause["object"])
@@ -562,7 +599,7 @@ def assign_clues_and_objects(
             elif clue_type == "object_adjacent":
                 clause = _make_object_adjacent_clause(
                     cell_id, cells, occupied_cells, rows, cols, rng,
-                    forbidden=globally_banned_objects | distance_anchor_objects,
+                    forbidden=globally_banned_objects | unique_anchor_objects,
                 )
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "absolute_position":
@@ -589,12 +626,17 @@ def assign_clues_and_objects(
             elif clue_type == "relative_to_object":
                 clause = _make_relative_to_object_clause(cell_id, cells, rng)
                 if clause is not None:
-                    distance_anchor_objects.add(clause["object"])
+                    unique_anchor_objects.add(clause["object"])
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "same_axis":
+                clause = _make_same_axis_clause(cell_id, cells, rng)
+                if clause is not None:
+                    unique_anchor_objects.add(clause["object"])
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "unique_object_on":
                 clause = _make_unique_object_on_clause(
                     cell, used_on_own_cell, rng,
-                    forbidden=globally_banned_objects | distance_anchor_objects,
+                    forbidden=globally_banned_objects | unique_anchor_objects,
                 )
                 if clause is not None:
                     used_on_own_cell.add(clause["object"])
@@ -701,6 +743,11 @@ def render_clue_template(structured: dict) -> str:
         distance = structured["distance"]
         return f"Estaba {_distance_phrase(direction, distance)} de la {obj}."
 
+    if clue_type == "same_axis":
+        obj = structured["object"]
+        axis_word = "fila" if structured["axis"] == "row" else "columna"
+        return f"Estaba en la misma {axis_word} que la {obj}."
+
     if clue_type == "relational_attribute":
         attribute = structured["attribute"]
         value = structured["value"]
@@ -749,7 +796,9 @@ def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
 # persona. Siempre se pueden evaluar del todo en cuanto se coloca a esa
 # persona. relative_to_object entra aqui porque el objeto ancla es parte
 # de la geometria fija (ya colocado antes de resolver), no de la solucion.
-ROW_LOCAL_CLUE_TYPES = {"area", "object_on", "object_adjacent", "absolute_position", "relative_to_object"}
+ROW_LOCAL_CLUE_TYPES = {
+    "area", "object_on", "object_adjacent", "absolute_position", "relative_to_object", "same_axis",
+}
 
 # Tipos que dependen de una persona concreta, nombrada por id. Se pueden
 # evaluar en cuanto ESA persona (no falta que este todo el mundo) ya

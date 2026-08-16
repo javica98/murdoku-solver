@@ -782,6 +782,48 @@ def test_relative_to_object_fails_when_object_is_not_unique_on_board():
     assert len(check_clues_satisfied(puzzle, {"Brigitte": "r1c1", "Vlad": "r2c0"})) == 1
 
 
+def _puzzle_for_same_axis_tests(structured: dict) -> Puzzle:
+    cells = {f"r{row}c{col}": Cell(area=None) for row in range(3) for col in range(2)}
+    cells["r0c1"].objects = ["planta"]
+    return Puzzle(
+        id="same_axis_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=2),
+        areas={},
+        cells=cells,
+        people=[
+            Person(id="Brigitte", role="suspect", clue=Clue(text="...", structured=structured)),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Brigitte": "r0c0", "Vlad": "r2c1"},
+    )
+
+
+def test_same_axis_row_holds_when_object_is_in_the_same_row():
+    puzzle = _puzzle_for_same_axis_tests({"type": "same_axis", "object": "planta", "axis": "row"})
+    # Brigitte en r0c0, planta en r0c1 -> misma fila.
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_same_axis_row_fails_when_object_is_in_a_different_row():
+    puzzle = _puzzle_for_same_axis_tests({"type": "same_axis", "object": "planta", "axis": "col"})
+    # Brigitte en r0c0, planta en r0c1 -> distinta columna.
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_same_axis_fails_when_the_anchor_object_does_not_exist():
+    structured = {"type": "same_axis", "object": "no_existe", "axis": "row"}
+    puzzle = _puzzle_for_same_axis_tests(structured)
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_unsupported_same_axis_value_raises():
+    puzzle = _puzzle_for_same_axis_tests({"type": "same_axis", "object": "planta", "axis": "diagonal"})
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, puzzle.solution)
+
+
 def _puzzle_for_unique_object_tests() -> Puzzle:
     # r0c0 y r0c1 tienen "silla"; r0c2 no tiene nada.
     # r0c0 y r0c1 tienen "silla"; r0c2 y r0c3 no tienen nada. 3 personas,

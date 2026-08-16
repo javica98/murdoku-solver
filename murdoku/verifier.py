@@ -341,6 +341,24 @@ def evaluate_clue_positive(
 
         return _matches_direction_distance(row, col, anchor_row, anchor_col, direction, distance)
 
+    if clue_type == "same_axis":
+        # solo tiene sentido anclado a un OBJETO: dos personas nunca
+        # comparten fila ni columna (regla base del juego), asi que
+        # "misma fila/columna que otra persona" nunca podria ser cierto.
+        target_object = structured.get("object")
+        axis = structured.get("axis")
+
+        anchor_cell_id = _find_unique_object_cell(puzzle.cells, target_object)
+        if anchor_cell_id is None:
+            return False
+        anchor_row, anchor_col = parse_cell_id(anchor_cell_id)
+
+        if axis == "row":
+            return row == anchor_row
+        if axis == "col":
+            return col == anchor_col
+        raise ValueError(f"unsupported same_axis axis: {axis!r}")
+
     if clue_type == "unique_object_on":
         target_object = structured.get("object")
         if target_object not in cell.objects:

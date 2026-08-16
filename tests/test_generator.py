@@ -400,6 +400,58 @@ def test_room_count_and_room_parity_both_appear_across_many_seeds():
     assert "room_parity" in seen_types
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_same_axis_clue_holds(seed):
+    rng = random.Random(f"same-axis-{seed}")
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+        person_attributes=person_attributes,
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
+
+    assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
+
+
+def test_same_axis_appears_across_many_seeds():
+    seen_types = set()
+    for seed in range(30):
+        rng = random.Random(f"same-axis-coverage-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            seen_types.update(c["type"] for c in clauses)
+    assert "same_axis" in seen_types
+
+
+def test_same_axis_never_anchors_to_a_duplicated_object():
+    for seed in range(30):
+        rng = random.Random(f"same-axis-uniqueness-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        cells, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        anchored_objects = {
+            clause["object"]
+            for structured in clues.values()
+            for clause in structured.get("clauses", [structured])
+            if clause["type"] in ("relative_to_object", "same_axis")
+        }
+        for obj in anchored_objects:
+            cells_with_obj = [c for c in cells.values() if obj in c.objects]
+            assert len(cells_with_obj) == 1, f"seed={seed}: {obj} appears in {len(cells_with_obj)} cells"
+
+
 def test_render_clue_template_for_relational_attribute_none_with():
     text = render_clue_template(
         {"type": "relational_attribute", "attribute": "color_pelo", "value": "moreno", "relation": "none_with"}
@@ -464,6 +516,16 @@ def test_render_clue_template_for_room_parity_even():
 def test_render_clue_template_for_room_parity_odd():
     text = render_clue_template({"type": "room_parity", "parity": "odd"})
     assert text == "El numero de personas en su sala era impar."
+
+
+def test_render_clue_template_for_same_axis_row():
+    text = render_clue_template({"type": "same_axis", "object": "alfombra", "axis": "row"})
+    assert text == "Estaba en la misma fila que la alfombra."
+
+
+def test_render_clue_template_for_same_axis_col():
+    text = render_clue_template({"type": "same_axis", "object": "mesa", "axis": "col"})
+    assert text == "Estaba en la misma columna que la mesa."
 
 
 def test_object_on_clues_use_only_non_blocking_objects():

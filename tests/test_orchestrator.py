@@ -51,6 +51,10 @@ def test_relative_to_object_clue_is_simple():
     )
 
 
+def test_same_axis_clue_is_simple():
+    assert _is_simple_clue({"type": "same_axis", "object": "alfombra", "axis": "row"}) is True
+
+
 def test_negated_clue_is_not_simple_even_if_row_local():
     assert _is_simple_clue({"type": "area", "area": "ROOM", "negate": True}) is False
 
