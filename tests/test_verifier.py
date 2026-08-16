@@ -625,12 +625,97 @@ def test_violation_when_same_row_as_reference():
     assert "Brigitte's clue is not satisfied" in violations[0]
 
 
+def test_north_of_reference_holds_with_no_exact_distance():
+    structured = {"type": "relative_to_person", "reference": "Vlad", "direction": "north"}
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    # Brigitte en r1c1: fila menor que Vlad (r2) -> al norte, sin exigir distancia exacta.
+    solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_exact_distance_holds_only_at_the_right_offset():
+    structured = {
+        "type": "relative_to_person", "reference": "Cameron", "direction": "south", "distance": 1,
+    }
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    # Brigitte en r1c1: exactamente 1 fila al sur de Cameron (r0) -> cumple.
+    solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
+    assert check_clues_satisfied(puzzle, solution) == []
+
+
+def test_exact_distance_fails_at_the_wrong_offset():
+    structured = {
+        "type": "relative_to_person", "reference": "Cameron", "direction": "south", "distance": 2,
+    }
+    puzzle = _puzzle_for_relative_position_tests(structured)
+    # Brigitte en r1c1: solo 1 fila al sur de Cameron, no 2 -> no cumple.
+    solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
+    assert len(check_clues_satisfied(puzzle, solution)) == 1
+
+
 def test_unsupported_relative_to_person_direction_raises():
-    structured = {"type": "relative_to_person", "reference": "Cameron", "direction": "north"}
+    structured = {"type": "relative_to_person", "reference": "Cameron", "direction": "diagonal"}
     puzzle = _puzzle_for_relative_position_tests(structured)
     solution = {"Cameron": "r0c0", "Brigitte": "r1c1", "Vlad": "r2c0"}
     with pytest.raises(ValueError):
         check_clues_satisfied(puzzle, solution)
+
+
+def test_relative_to_object_holds_when_object_is_unique_on_board():
+    cells = {f"r{row}c{col}": Cell(area=None) for row in range(3) for col in range(2)}
+    cells["r0c0"].objects = ["planta"]
+    puzzle = Puzzle(
+        id="relative_to_object_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=2),
+        areas={},
+        cells=cells,
+        people=[
+            Person(
+                id="Brigitte",
+                role="suspect",
+                clue=Clue(
+                    text="...",
+                    structured={
+                        "type": "relative_to_object", "object": "planta", "direction": "south", "distance": 1,
+                    },
+                ),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Brigitte": "r1c1", "Vlad": "r2c0"},
+    )
+    assert check_clues_satisfied(puzzle, {"Brigitte": "r1c1", "Vlad": "r2c0"}) == []
+
+
+def test_relative_to_object_fails_when_object_is_not_unique_on_board():
+    cells = {f"r{row}c{col}": Cell(area=None) for row in range(3) for col in range(2)}
+    cells["r0c0"].objects = ["planta"]
+    cells["r0c1"].objects = ["planta"]
+    puzzle = Puzzle(
+        id="relative_to_object_ambiguous_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=2),
+        areas={},
+        cells=cells,
+        people=[
+            Person(
+                id="Brigitte",
+                role="suspect",
+                clue=Clue(
+                    text="...",
+                    structured={
+                        "type": "relative_to_object", "object": "planta", "direction": "south", "distance": 1,
+                    },
+                ),
+            ),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Brigitte": "r1c1", "Vlad": "r2c0"},
+    )
+    assert len(check_clues_satisfied(puzzle, {"Brigitte": "r1c1", "Vlad": "r2c0"})) == 1
 
 
 def _puzzle_for_unique_object_tests() -> Puzzle:

@@ -32,6 +32,15 @@ def test_relational_clue_is_not_simple():
     assert _is_simple_clue({"type": "relative_to_person", "reference": "P0", "relation": "same_row"}) is False
 
 
+def test_relative_to_object_clue_is_simple():
+    # ancla a un objeto ya colocado (geometria fija), no a otra persona --
+    # se puede evaluar solo con la celda propia, como area/object_on.
+    assert (
+        _is_simple_clue({"type": "relative_to_object", "object": "alfombra", "direction": "north", "distance": 2})
+        is True
+    )
+
+
 def test_negated_clue_is_not_simple_even_if_row_local():
     assert _is_simple_clue({"type": "area", "area": "ROOM", "negate": True}) is False
 

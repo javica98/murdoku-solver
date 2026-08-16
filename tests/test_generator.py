@@ -290,6 +290,81 @@ def test_relational_attribute_appears_across_many_seeds():
     assert "relational_attribute" in seen_types
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_relative_to_person_and_object_clues_hold(seed):
+    rng = random.Random(f"relative-distance-{seed}")
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+        person_attributes=person_attributes,
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
+
+    assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
+
+
+def test_relative_to_person_and_relative_to_object_both_appear_across_many_seeds():
+    seen_types = set()
+    for seed in range(30):
+        rng = random.Random(f"relative-distance-coverage-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        person_attributes = assign_attributes(people, rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+            person_attributes=person_attributes,
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            seen_types.update(c["type"] for c in clauses)
+    assert "relative_to_person" in seen_types
+    assert "relative_to_object" in seen_types
+
+
+def test_relative_to_person_clue_always_carries_an_exact_distance():
+    # el generador siempre debe fijar distance (el modo sin distancia es
+    # solo para compatibilidad con puzzles reales transcritos a mano).
+    for seed in range(20):
+        rng = random.Random(f"relative-to-person-distance-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            for clause in clauses:
+                if clause["type"] == "relative_to_person":
+                    assert isinstance(clause["distance"], int) and clause["distance"] > 0
+
+
+def test_relative_to_object_never_anchors_to_a_duplicated_object():
+    # si un objeto ancla una distancia y otra pista lo vuelve a colocar en
+    # otra celda, la distancia dejaria de ser inequivoca.
+    for seed in range(30):
+        rng = random.Random(f"relative-to-object-uniqueness-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        cells, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        anchored_objects = {
+            clause["object"]
+            for structured in clues.values()
+            for clause in structured.get("clauses", [structured])
+            if clause["type"] == "relative_to_object"
+        }
+        for obj in anchored_objects:
+            cells_with_obj = [c for c in cells.values() if obj in c.objects]
+            assert len(cells_with_obj) == 1, f"seed={seed}: {obj} appears in {len(cells_with_obj)} cells"
+
+
 def test_render_clue_template_for_relational_attribute_none_with():
     text = render_clue_template(
         {"type": "relational_attribute", "attribute": "color_pelo", "value": "moreno", "relation": "none_with"}
@@ -302,6 +377,33 @@ def test_render_clue_template_for_relational_attribute_with_another():
         {"type": "relational_attribute", "attribute": "gafas", "value": "con_gafas", "relation": "with_another"}
     )
     assert text == "Alguien mas en su sala llevaba gafas."
+
+
+def test_render_clue_template_for_relative_to_person_without_distance():
+    # compatibilidad con puzzles reales transcritos que no llevan "distance".
+    text = render_clue_template({"type": "relative_to_person", "reference": "Cameron", "direction": "south"})
+    assert text == "Estaba al sur de Cameron."
+
+
+def test_render_clue_template_for_relative_to_person_with_exact_distance():
+    text = render_clue_template(
+        {"type": "relative_to_person", "reference": "Cameron", "direction": "north", "distance": 1}
+    )
+    assert text == "Estaba 1 fila al norte de Cameron."
+
+
+def test_render_clue_template_pluralizes_distance_correctly():
+    text = render_clue_template(
+        {"type": "relative_to_person", "reference": "Cameron", "direction": "east", "distance": 3}
+    )
+    assert text == "Estaba 3 columnas al este de Cameron."
+
+
+def test_render_clue_template_for_relative_to_object():
+    text = render_clue_template(
+        {"type": "relative_to_object", "object": "alfombra", "direction": "west", "distance": 2}
+    )
+    assert text == "Estaba 2 columnas al oeste de la alfombra."
 
 
 def test_object_on_clues_use_only_non_blocking_objects():

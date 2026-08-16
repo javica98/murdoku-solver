@@ -119,6 +119,34 @@ def _orthogonal_neighbors(row: int, col: int) -> list[tuple[int, int]]:
     return [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]
 
 
+def _matches_direction_distance(
+    row: int, col: int, anchor_row: int, anchor_col: int, direction: str, distance: int | None
+) -> bool:
+    """Si `distance` es None, es la semantica antigua/mas debil ("en algun
+    punto en esa direccion", sin fijar el eje contrario) -- se mantiene
+    por los puzzles reales transcritos que usan esta pista sin distancia
+    exacta. Si `distance` es un numero, exige esa distancia EXACTA en el
+    eje correspondiente (el otro eje queda libre).
+    """
+    if direction == "north":
+        return row < anchor_row if distance is None else row == anchor_row - distance
+    if direction == "south":
+        return row > anchor_row if distance is None else row == anchor_row + distance
+    if direction == "west":
+        return col < anchor_col if distance is None else col == anchor_col - distance
+    if direction == "east":
+        return col > anchor_col if distance is None else col == anchor_col + distance
+    raise ValueError(f"unsupported direction: {direction!r}")
+
+
+def _find_unique_object_cell(cells: dict[str, Cell], obj: str) -> str | None:
+    """La celda donde esta `obj`, solo si aparece en una UNICA celda de
+    todo el tablero -- si no, anclar una distancia a el seria ambiguo.
+    """
+    matches = [cell_id for cell_id, cell in cells.items() if obj in cell.objects]
+    return matches[0] if len(matches) == 1 else None
+
+
 def clue_holds(
     structured: dict[str, Any],
     person_id: str,
@@ -265,16 +293,26 @@ def evaluate_clue_positive(
     if clue_type == "relative_to_person":
         reference_id = structured.get("reference")
         direction = structured.get("direction")
+        distance = structured.get("distance")
 
         reference_cell_id = solution.get(reference_id)
         if reference_cell_id is None:
             return False
-        reference_row, _ = parse_cell_id(reference_cell_id)
+        reference_row, reference_col = parse_cell_id(reference_cell_id)
 
-        if direction == "south":
-            return row > reference_row
+        return _matches_direction_distance(row, col, reference_row, reference_col, direction, distance)
 
-        raise ValueError(f"unsupported relative_to_person direction: {direction!r}")
+    if clue_type == "relative_to_object":
+        target_object = structured.get("object")
+        direction = structured.get("direction")
+        distance = structured.get("distance")
+
+        anchor_cell_id = _find_unique_object_cell(puzzle.cells, target_object)
+        if anchor_cell_id is None:
+            return False
+        anchor_row, anchor_col = parse_cell_id(anchor_cell_id)
+
+        return _matches_direction_distance(row, col, anchor_row, anchor_col, direction, distance)
 
     if clue_type == "unique_object_on":
         target_object = structured.get("object")

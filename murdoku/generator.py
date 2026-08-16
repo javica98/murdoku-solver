@@ -315,12 +315,76 @@ def _people_sharing_area(
     )
 
 
-def _people_with_smaller_row(person_id: str, row: int, placement: dict[str, str]) -> list[str]:
-    return sorted(
-        pid
-        for pid, other_cell_id in placement.items()
-        if pid != person_id and parse_cell_id(other_cell_id)[0] < row
-    )
+def _direction_and_distance(row: int, col: int, anchor_row: int, anchor_col: int, axis: str) -> tuple[str, int]:
+    """Direccion + distancia EXACTA de (row, col) respecto a (anchor_row,
+    anchor_col) en un solo eje -- fila (norte/sur) o columna (este/oeste).
+    """
+    if axis == "row":
+        return ("south", row - anchor_row) if row > anchor_row else ("north", anchor_row - row)
+    return ("east", col - anchor_col) if col > anchor_col else ("west", anchor_col - col)
+
+
+def _make_relative_to_person_clause(
+    person_id: str, cell_id: str, placement: dict[str, str], rng: random.Random
+) -> dict | None:
+    others = [pid for pid in placement if pid != person_id]
+    if not others:
+        return None
+
+    row, col = parse_cell_id(cell_id)
+    reference = rng.choice(others)
+    reference_row, reference_col = parse_cell_id(placement[reference])
+
+    # fila y columna nunca coinciden entre dos personas distintas (una
+    # persona por fila/columna), asi que los dos ejes son siempre validos.
+    axis = rng.choice(["row", "col"])
+    direction, distance = _direction_and_distance(row, col, reference_row, reference_col, axis)
+
+    return {
+        "type": "relative_to_person",
+        "reference": reference,
+        "direction": direction,
+        "distance": distance,
+    }
+
+
+def _relative_to_object_candidates(cell_id: str, cells: dict[str, Cell]) -> list[tuple[str, str, int]]:
+    """(objeto, direccion, distancia) candidatos validos para anclar una
+    pista de distancia a un objeto -- solo objetos que aparecen en una
+    UNICA celda de todo el tablero (si no, la distancia seria ambigua), y
+    solo ejes donde la distancia no sea cero (mismo eje que el objeto no
+    dice nada sobre "norte" o "sur").
+    """
+    row, col = parse_cell_id(cell_id)
+
+    cells_by_object: dict[str, list[str]] = {}
+    for other_cell_id, cell in cells.items():
+        for obj in cell.objects:
+            cells_by_object.setdefault(obj, []).append(other_cell_id)
+
+    candidates = []
+    for obj, cell_ids in cells_by_object.items():
+        if len(cell_ids) != 1:
+            continue
+        anchor_row, anchor_col = parse_cell_id(cell_ids[0])
+        if row != anchor_row:
+            direction, distance = _direction_and_distance(row, col, anchor_row, anchor_col, "row")
+            candidates.append((obj, direction, distance))
+        if col != anchor_col:
+            direction, distance = _direction_and_distance(row, col, anchor_row, anchor_col, "col")
+            candidates.append((obj, direction, distance))
+    return candidates
+
+
+def _make_relative_to_object_clause(
+    cell_id: str, cells: dict[str, Cell], rng: random.Random
+) -> dict | None:
+    candidates = _relative_to_object_candidates(cell_id, cells)
+    if not candidates:
+        return None
+
+    obj, direction, distance = rng.choice(candidates)
+    return {"type": "relative_to_object", "object": obj, "direction": direction, "distance": distance}
 
 
 def _available_global_types(
@@ -349,12 +413,10 @@ def _available_global_types(
     """
     types = []
 
-    row, _ = parse_cell_id(cell_id)
     has_free_neighbor = any(
         n not in occupied_cells for n in _orthogonal_neighbor_ids(cell_id, rows, cols)
     )
     others_in_area = _people_sharing_area(person_id, cell.area, cells, placement)
-    people_south_of = _people_with_smaller_row(person_id, row, placement)
 
     if has_free_neighbor:
         types.append("empty_neighbor")
@@ -363,7 +425,9 @@ def _available_global_types(
     if others_in_area:
         types.append("with_person")
         types.append("relational_attribute")
-    if people_south_of:
+    if len(placement) > 1:
+        # cualquier otra persona sirve de referencia (norte/sur/este/oeste,
+        # no solo "al sur de alguien mas arriba" como antes).
         types.append("relative_to_person")
     if any(obj not in used_on_own_cell for obj in NON_BLOCKING_OBJECTS):
         types.append("unique_object_on")
@@ -385,11 +449,12 @@ def assign_clues_and_objects(
     colocacion (combinados con "all" si son mas de uno) y coloca los
     objetos que hagan falta para que lo sean.
 
-    Cubre los 3 tipos "de celda propia" (area, object_on, object_adjacent
-    -- siempre se pueden forzar) y 5 relacionales (empty_neighbor,
-    relational_person/alone, with_person, relative_to_person,
-    relational_attribute -- solo disponibles si la colocacion ya los hace
-    ciertos por si sola, ver `_available_global_types`).
+    Cubre los 4 tipos "de celda propia" (area, object_on, object_adjacent,
+    relative_to_object -- siempre se pueden forzar o ya estan fijados por
+    la geometria) y 5 relacionales (empty_neighbor, relational_person/alone,
+    with_person, relative_to_person, relational_attribute -- solo
+    disponibles si la colocacion ya los hace ciertos por si sola, ver
+    `_available_global_types`).
 
     Las relacionales no se pueden podar temprano al comprobar unicidad
     (dependen de donde esta el resto de gente, no solo de la celda
@@ -421,6 +486,10 @@ def assign_clues_and_objects(
     # colocacion posterior podria colarse justo donde esa pista dice que
     # NO deberia haber nada). Ver _make_negated_object_adjacent_clause.
     globally_banned_objects: set[str] = set()
+    # objetos que YA anclan una pista relative_to_object en curso -- si se
+    # colocara una segunda copia en otra celda, esa distancia dejaria de
+    # ser inequivoca. Ver _relative_to_object_candidates.
+    distance_anchor_objects: set[str] = set()
 
     person_ids = list(placement.keys())
     relational_eligible = set(
@@ -429,12 +498,16 @@ def assign_clues_and_objects(
 
     for person_id, cell_id in placement.items():
         cell = cells[cell_id]
-        row, _ = parse_cell_id(cell_id)
 
         available_types = [
             "area", "object_on", "object_adjacent", "absolute_position",
             "any_area", "negated_object_adjacent",
         ]
+        # row-local igual que absolute_position (el objeto ancla es
+        # geometria fija, no depende de donde acabe nadie) -- no hace
+        # falta limitarla con num_relational_people.
+        if _relative_to_object_candidates(cell_id, cells):
+            available_types.append("relative_to_object")
         if person_id in relational_eligible:
             available_types += _available_global_types(
                 person_id, cell_id, cell, cells, placement, occupied_cells,
@@ -448,7 +521,8 @@ def assign_clues_and_objects(
                 clauses.append(_make_area_clause(cell))
             elif clue_type == "object_on":
                 clause = _make_object_on_clause(
-                    cell, rng, forbidden=used_on_own_cell | globally_banned_objects
+                    cell, rng,
+                    forbidden=used_on_own_cell | globally_banned_objects | distance_anchor_objects,
                 )
                 if clause is not None:
                     used_on_own_cell.add(clause["object"])
@@ -456,7 +530,7 @@ def assign_clues_and_objects(
             elif clue_type == "object_adjacent":
                 clause = _make_object_adjacent_clause(
                     cell_id, cells, occupied_cells, rows, cols, rng,
-                    forbidden=globally_banned_objects,
+                    forbidden=globally_banned_objects | distance_anchor_objects,
                 )
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "absolute_position":
@@ -478,13 +552,17 @@ def assign_clues_and_objects(
                 reference = rng.choice(_people_sharing_area(person_id, cell.area, cells, placement))
                 clauses.append({"type": "with_person", "reference": reference})
             elif clue_type == "relative_to_person":
-                reference = rng.choice(_people_with_smaller_row(person_id, row, placement))
-                clauses.append(
-                    {"type": "relative_to_person", "reference": reference, "direction": "south"}
-                )
+                clause = _make_relative_to_person_clause(person_id, cell_id, placement, rng)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "relative_to_object":
+                clause = _make_relative_to_object_clause(cell_id, cells, rng)
+                if clause is not None:
+                    distance_anchor_objects.add(clause["object"])
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
             elif clue_type == "unique_object_on":
                 clause = _make_unique_object_on_clause(
-                    cell, used_on_own_cell, rng, forbidden=globally_banned_objects
+                    cell, used_on_own_cell, rng,
+                    forbidden=globally_banned_objects | distance_anchor_objects,
                 )
                 if clause is not None:
                     used_on_own_cell.add(clause["object"])
@@ -505,6 +583,16 @@ def _negate_sentence(text: str) -> str:
     if text.startswith("Estaba "):
         return "No estaba " + text[len("Estaba ") :]
     return "No " + text[0].lower() + text[1:]
+
+
+_DIRECTION_LABELS = {"north": "norte", "south": "sur", "east": "este", "west": "oeste"}
+_DIRECTION_AXIS_WORD = {"north": "fila", "south": "fila", "east": "columna", "west": "columna"}
+
+
+def _distance_phrase(direction: str, distance: int) -> str:
+    axis_word = _DIRECTION_AXIS_WORD[direction]
+    unit = axis_word if distance == 1 else axis_word + "s"
+    return f"{distance} {unit} al {_DIRECTION_LABELS[direction]}"
 
 
 def render_clue_template(structured: dict) -> str:
@@ -561,8 +649,19 @@ def render_clue_template(structured: dict) -> str:
     if clue_type == "with_person":
         return f"Estaba con {structured['reference']}."
 
-    if clue_type == "relative_to_person" and structured.get("direction") == "south":
-        return f"Estaba al sur de {structured['reference']}."
+    if clue_type == "relative_to_person":
+        reference = structured["reference"]
+        direction = structured["direction"]
+        distance = structured.get("distance")
+        if distance is None:
+            return f"Estaba al {_DIRECTION_LABELS[direction]} de {reference}."
+        return f"Estaba {_distance_phrase(direction, distance)} de {reference}."
+
+    if clue_type == "relative_to_object":
+        obj = structured["object"]
+        direction = structured["direction"]
+        distance = structured["distance"]
+        return f"Estaba {_distance_phrase(direction, distance)} de la {obj}."
 
     if clue_type == "relational_attribute":
         attribute = structured["attribute"]
@@ -599,8 +698,9 @@ def reword_with_llm(text: str, client, model: str = "gpt-5.4-nano") -> str:
 # Tipos que solo dependen de la celda propia de la persona (y de la
 # geometria estatica del tablero) -- nunca de donde esta colocada otra
 # persona. Siempre se pueden evaluar del todo en cuanto se coloca a esa
-# persona.
-ROW_LOCAL_CLUE_TYPES = {"area", "object_on", "object_adjacent", "absolute_position"}
+# persona. relative_to_object entra aqui porque el objeto ancla es parte
+# de la geometria fija (ya colocado antes de resolver), no de la solucion.
+ROW_LOCAL_CLUE_TYPES = {"area", "object_on", "object_adjacent", "absolute_position", "relative_to_object"}
 
 # Tipos que dependen de una persona concreta, nombrada por id. Se pueden
 # evaluar en cuanto ESA persona (no falta que este todo el mundo) ya
