@@ -66,6 +66,17 @@ def test_unrecognized_future_clue_type_defaults_to_not_simple():
     assert _is_simple_clue({"type": "distance_direction", "steps": 2, "direction": "north"}) is False
 
 
+def test_relational_attribute_clue_is_not_simple():
+    # depende de los atributos de TODOS los compañeros de sala, no solo
+    # de la celda propia -- igual que with_person/relative_to_person.
+    assert (
+        _is_simple_clue(
+            {"type": "relational_attribute", "attribute": "genero", "value": "hombre", "relation": "none_with"}
+        )
+        is False
+    )
+
+
 def test_puzzle_with_only_row_local_clues_routes_to_cheap_model():
     puzzle = _puzzle_with_clues(
         {"type": "area", "area": "ROOM"},

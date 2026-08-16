@@ -4,7 +4,9 @@ from unittest.mock import Mock
 import pytest
 
 from murdoku.generator import (
+    ATTRIBUTE_CATALOG,
     NON_BLOCKING_OBJECTS,
+    assign_attributes,
     assign_clues_and_objects,
     find_all_solutions,
     generate_placement,
@@ -149,11 +151,19 @@ def test_no_isolated_cells_across_many_random_seeds(seed):
     assert not _has_isolated_cell(cells), f"seed={seed}: found an isolated cell"
 
 
-def _build_puzzle(rows: int, cols: int, cells: dict, placement: dict, clues: dict) -> Puzzle:
+def _build_puzzle(
+    rows: int,
+    cols: int,
+    cells: dict,
+    placement: dict,
+    clues: dict,
+    person_attributes: dict | None = None,
+) -> Puzzle:
     areas: dict = {}
     for cell_id, cell in cells.items():
         areas.setdefault(cell.area, []).append(cell_id)
 
+    person_attributes = person_attributes or {}
     return Puzzle(
         id="generated_test",
         scenario="test",
@@ -162,7 +172,12 @@ def _build_puzzle(rows: int, cols: int, cells: dict, placement: dict, clues: dic
         areas=areas,
         cells=cells,
         people=[
-            Person(id=pid, role="suspect", clue=Clue(text="...", structured=clues[pid]))
+            Person(
+                id=pid,
+                role="suspect",
+                clue=Clue(text="...", structured=clues[pid]),
+                attributes=person_attributes.get(pid, {}),
+            )
             for pid in placement
         ],
     )
@@ -210,13 +225,83 @@ def test_derived_clues_hold_at_maximum_clue_density(seed):
     people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
     placement = generate_placement(6, 6, people, rng=rng)
     rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
     cells, clues = assign_clues_and_objects(
-        placement, rooms, 6, 6, rng=rng, num_clues=3, num_relational_people=6
+        placement, rooms, 6, 6, rng=rng, num_clues=3, num_relational_people=6,
+        person_attributes=person_attributes,
     )
-    puzzle = _build_puzzle(6, 6, cells, placement, clues)
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
 
     assert check_no_blocked_cells(puzzle, placement) == []
     assert check_clues_satisfied(puzzle, placement) == []
+
+
+def test_assign_attributes_gives_everyone_a_value_for_every_catalog_attribute():
+    people = ["Ada", "Bruno", "Carmen"]
+    attributes = assign_attributes(people, random.Random(0))
+    assert set(attributes.keys()) == set(people)
+    for person_attrs in attributes.values():
+        assert set(person_attrs.keys()) == set(ATTRIBUTE_CATALOG.keys())
+        for attribute, value in person_attrs.items():
+            assert value in ATTRIBUTE_CATALOG[attribute]
+
+
+def test_assign_attributes_is_reproducible_with_the_same_seed():
+    people = ["Ada", "Bruno", "Carmen"]
+    a = assign_attributes(people, random.Random(3))
+    b = assign_attributes(people, random.Random(3))
+    assert a == b
+
+
+@pytest.mark.parametrize("seed", range(30))
+def test_relational_attribute_clue_actually_gets_produced_and_holds(seed):
+    # con num_relational_people = todo el mundo, relational_attribute
+    # deberia aparecer tarde o temprano -- si nunca se produce, algo en
+    # _available_global_types o en el dispatch esta roto en silencio.
+    rng = random.Random(f"relational-attribute-{seed}")
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+        person_attributes=person_attributes,
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
+
+    assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
+
+
+def test_relational_attribute_appears_across_many_seeds():
+    seen_types = set()
+    for seed in range(30):
+        rng = random.Random(f"relational-attribute-coverage-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        person_attributes = assign_attributes(people, rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+            person_attributes=person_attributes,
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            seen_types.update(c["type"] for c in clauses)
+    assert "relational_attribute" in seen_types
+
+
+def test_render_clue_template_for_relational_attribute_none_with():
+    text = render_clue_template(
+        {"type": "relational_attribute", "attribute": "color_pelo", "value": "moreno", "relation": "none_with"}
+    )
+    assert text == "Nadie mas en su sala tenia el pelo moreno."
+
+
+def test_render_clue_template_for_relational_attribute_with_another():
+    text = render_clue_template(
+        {"type": "relational_attribute", "attribute": "gafas", "value": "con_gafas", "relation": "with_another"}
+    )
+    assert text == "Alguien mas en su sala llevaba gafas."
 
 
 def test_object_on_clues_use_only_non_blocking_objects():
@@ -256,8 +341,10 @@ def test_render_clue_template_for_object_adjacent():
 
 
 def test_render_clue_template_rejects_unsupported_type():
+    # placeholder del backlog: "a N filas/columnas al norte/sur/este/oeste
+    # de X" -- todavia no tiene plantilla ni implementacion.
     with pytest.raises(ValueError):
-        render_clue_template({"type": "relational_attribute", "relation": "alone"})
+        render_clue_template({"type": "distance_direction", "direction": "north"})
 
 
 def test_render_clue_template_joins_all_clauses_into_one_text():

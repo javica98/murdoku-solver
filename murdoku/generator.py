@@ -120,6 +120,51 @@ BLOCKING_OBJECTS = ["estanteria", "mesa", "planta"]
 NON_BLOCKING_OBJECTS = ["silla", "alfombra", "cama"]
 ALL_OBJECTS = BLOCKING_OBJECTS + NON_BLOCKING_OBJECTS
 
+# Rasgos fisicos para pistas de tipo relational_attribute. Cada atributo
+# es solo un dict valor -> frase descriptiva -- la parte tecnica (elegir
+# atributo, comparar valores, redactar la frase) funciona identica para
+# cualquiera de ellos, asi que anadir un atributo nuevo es solo anadir
+# una entrada aqui. Las frases del valor "negativo" de un atributo
+# binario se escriben como "iba sin X" (nunca "no tenia X"), para que la
+# plantilla "Nadie mas ... {descriptor}" no acabe en doble negacion.
+ATTRIBUTE_CATALOG: dict[str, dict[str, str]] = {
+    "genero": {
+        "hombre": "era un hombre",
+        "mujer": "era una mujer",
+    },
+    "color_pelo": {
+        "rubio": "tenia el pelo rubio",
+        "moreno": "tenia el pelo moreno",
+        "pelirrojo": "tenia el pelo pelirrojo",
+        "canoso": "tenia el pelo canoso",
+    },
+    "gafas": {
+        "con_gafas": "llevaba gafas",
+        "sin_gafas": "iba sin gafas",
+    },
+    "barba": {
+        "con_barba": "tenia barba",
+        "sin_barba": "iba sin barba",
+    },
+}
+
+
+def assign_attributes(person_ids: list[str], rng: random.Random) -> dict[str, dict[str, str]]:
+    """Asigna a cada persona un valor de CADA atributo del catalogo, al azar.
+
+    Todo el mundo (sospechosos y victima) recibe los mismos atributos --
+    no hay ninguna razon tecnica para excluir a la victima, y si un
+    sospechoso acaba compartiendo sala con ella, tambien puede comparar
+    su rasgo contra el de ella.
+    """
+    return {
+        person_id: {
+            attribute: rng.choice(list(values.keys()))
+            for attribute, values in ATTRIBUTE_CATALOG.items()
+        }
+        for person_id in person_ids
+    }
+
 
 def _make_area_clause(cell: Cell) -> dict:
     return {"type": "area", "area": cell.area}
@@ -236,6 +281,30 @@ def _make_unique_object_on_clause(
     return {"type": "unique_object_on", "object": obj}
 
 
+def _make_relational_attribute_clause(
+    person_id: str,
+    area: str | None,
+    cells: dict[str, Cell],
+    placement: dict[str, str],
+    person_attributes: dict[str, dict[str, str]],
+    rng: random.Random,
+) -> dict | None:
+    roommates = _people_sharing_area(person_id, area, cells, placement)
+    if not roommates:
+        return None
+
+    attribute = rng.choice(list(ATTRIBUTE_CATALOG.keys()))
+    value = person_attributes[person_id][attribute]
+    shared = any(person_attributes[pid][attribute] == value for pid in roommates)
+
+    return {
+        "type": "relational_attribute",
+        "attribute": attribute,
+        "value": value,
+        "relation": "with_another" if shared else "none_with",
+    }
+
+
 def _people_sharing_area(
     person_id: str, area: str, cells: dict[str, Cell], placement: dict[str, str]
 ) -> list[str]:
@@ -293,6 +362,7 @@ def _available_global_types(
         types.append("relational_person_alone")
     if others_in_area:
         types.append("with_person")
+        types.append("relational_attribute")
     if people_south_of:
         types.append("relative_to_person")
     if any(obj not in used_on_own_cell for obj in NON_BLOCKING_OBJECTS):
@@ -309,16 +379,17 @@ def assign_clues_and_objects(
     rng: random.Random | None = None,
     num_clues: int = 1,
     num_relational_people: int = 0,
+    person_attributes: dict[str, dict[str, str]] | None = None,
 ) -> tuple[dict[str, Cell], dict[str, dict]]:
     """Para cada persona, elige `num_clues` tipos de pista ciertos segun su
     colocacion (combinados con "all" si son mas de uno) y coloca los
     objetos que hagan falta para que lo sean.
 
     Cubre los 3 tipos "de celda propia" (area, object_on, object_adjacent
-    -- siempre se pueden forzar) y 4 relacionales (empty_neighbor,
-    relational_person/alone, with_person, relative_to_person -- solo
-    disponibles si la colocacion ya los hace ciertos por si sola, ver
-    `_available_relational_types`).
+    -- siempre se pueden forzar) y 5 relacionales (empty_neighbor,
+    relational_person/alone, with_person, relative_to_person,
+    relational_attribute -- solo disponibles si la colocacion ya los hace
+    ciertos por si sola, ver `_available_global_types`).
 
     Las relacionales no se pueden podar temprano al comprobar unicidad
     (dependen de donde esta el resto de gente, no solo de la celda
@@ -339,6 +410,8 @@ def assign_clues_and_objects(
     occupied_cells = set(placement.values())
     clues: dict[str, dict] = {}
     area_names = sorted({cell.area for cell in cells.values() if cell.area is not None})
+    if person_attributes is None:
+        person_attributes = assign_attributes(list(placement.keys()), rng)
     # objetos ya colocados en la celda PROPIA de alguien (object_on o
     # unique_object_on) -- unique_object_on necesita saber esto para no
     # elegir un objeto que ya deje de ser unico.
@@ -416,6 +489,11 @@ def assign_clues_and_objects(
                 if clause is not None:
                     used_on_own_cell.add(clause["object"])
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "relational_attribute":
+                clause = _make_relational_attribute_clause(
+                    person_id, cell.area, cells, placement, person_attributes, rng
+                )
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
 
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
@@ -485,6 +563,13 @@ def render_clue_template(structured: dict) -> str:
 
     if clue_type == "relative_to_person" and structured.get("direction") == "south":
         return f"Estaba al sur de {structured['reference']}."
+
+    if clue_type == "relational_attribute":
+        attribute = structured["attribute"]
+        value = structured["value"]
+        descriptor = ATTRIBUTE_CATALOG[attribute][value]
+        subject = "Nadie mas" if structured["relation"] == "none_with" else "Alguien mas"
+        return f"{subject} en su sala {descriptor}."
 
     raise ValueError(f"no hay plantilla para el tipo de pista: {clue_type!r}")
 
@@ -720,6 +805,7 @@ def generate_puzzle(
     for attempt in range(max_attempts):
         placement = generate_placement(rows, cols, person_ids, rng=rng)
         rooms = generate_rooms(rows, cols, area_names, rng=rng)
+        person_attributes = assign_attributes(person_ids, rng)
         cells, clues = assign_clues_and_objects(
             placement,
             rooms,
@@ -728,6 +814,7 @@ def generate_puzzle(
             rng=rng,
             num_clues=num_clues,
             num_relational_people=num_relational_people,
+            person_attributes=person_attributes,
         )
 
         areas: dict[str, list[str]] = {}
@@ -746,6 +833,7 @@ def generate_puzzle(
                         structured=clues[person_id],
                     )
                 ),
+                attributes=person_attributes[person_id],
             )
             for person_id in person_ids
         ]
