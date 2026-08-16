@@ -120,6 +120,65 @@ BLOCKING_OBJECTS = ["estanteria", "mesa", "planta"]
 NON_BLOCKING_OBJECTS = ["silla", "alfombra", "cama"]
 ALL_OBJECTS = BLOCKING_OBJECTS + NON_BLOCKING_OBJECTS
 
+# Objetos "twist" que ocupan varias celdas CONTIGUAS -- nombre -> nº de
+# celdas. Siempre bloqueantes (nadie puede colocarse encima de ninguna
+# de sus celdas). No entran en ALL_OBJECTS: no se pueden usar como ancla
+# de object_on/relative_to_object/same_axis (ambiguos al abarcar varias
+# celdas), solo aparecen si toca colocarlos como twist de dificultad.
+MULTI_CELL_OBJECTS: dict[str, int] = {"elefante": 4, "sofa": 2}
+
+
+def _place_multi_cell_object(
+    cells: dict[str, Cell],
+    occupied_cells: set[str],
+    rows: int,
+    cols: int,
+    rng: random.Random,
+    max_attempts: int = 50,
+) -> str | None:
+    """Coloca UN objeto grande en celdas contiguas, todas de la MISMA
+    sala, libres de gente y de otros objetos. Si no cabe en ningun sitio
+    tras `max_attempts` semillas, no coloca nada (el puzzle sigue siendo
+    valido sin el twist) en vez de fallar.
+    """
+    obj = rng.choice(list(MULTI_CELL_OBJECTS.keys()))
+    size = MULTI_CELL_OBJECTS[obj]
+
+    candidates = [
+        cell_id
+        for cell_id, cell in cells.items()
+        if cell_id not in occupied_cells and not cell.objects and not cell.blocked
+    ]
+    rng.shuffle(candidates)
+
+    for seed in candidates[:max_attempts]:
+        area = cells[seed].area
+        footprint = {seed}
+        frontier = [seed]
+
+        while len(footprint) < size and frontier:
+            current = frontier.pop()
+            neighbor_ids = _orthogonal_neighbor_ids(current, rows, cols)
+            rng.shuffle(neighbor_ids)
+            for neighbor_id in neighbor_ids:
+                if len(footprint) == size or neighbor_id in footprint:
+                    continue
+                neighbor = cells.get(neighbor_id)
+                if neighbor is None or neighbor.area != area:
+                    continue
+                if neighbor_id in occupied_cells or neighbor.objects or neighbor.blocked:
+                    continue
+                footprint.add(neighbor_id)
+                frontier.append(neighbor_id)
+
+        if len(footprint) == size:
+            for cell_id in footprint:
+                cells[cell_id].objects.append(obj)
+                cells[cell_id].blocked = True
+            return obj
+
+    return None
+
 # Rasgos fisicos para pistas de tipo relational_attribute. Cada atributo
 # es solo un dict valor -> frase descriptiva -- la parte tecnica (elegir
 # atributo, comparar valores, redactar la frase) funciona identica para
@@ -542,6 +601,7 @@ def assign_clues_and_objects(
     num_clues: int = 1,
     num_relational_people: int = 0,
     person_attributes: dict[str, dict[str, str]] | None = None,
+    num_multi_cell_objects: int = 0,
 ) -> tuple[dict[str, Cell], dict[str, dict]]:
     """Para cada persona, elige `num_clues` tipos de pista ciertos segun su
     colocacion (combinados con "all" si son mas de uno) y coloca los
@@ -563,6 +623,12 @@ def assign_clues_and_objects(
     pista relacional; el resto se queda solo con las 3 de celda propia,
     que sabemos que podan bien sea cual sea el tamaño del tablero.
 
+    `num_multi_cell_objects` coloca ese numero de objetos "twist" que
+    ocupan varias celdas contiguas de una misma sala (ver
+    MULTI_CELL_OBJECTS / _place_multi_cell_object) ANTES de derivar
+    ninguna pista, para que las celdas que ocupan ya cuenten como
+    bloqueadas de cara al resto de la generacion.
+
     Devuelve una copia de `cells` con los objetos añadidos, y un dict
     persona -> clue.structured.
     """
@@ -573,6 +639,8 @@ def assign_clues_and_objects(
     occupied_cells = set(placement.values())
     clues: dict[str, dict] = {}
     area_names = sorted({cell.area for cell in cells.values() if cell.area is not None})
+    for _ in range(num_multi_cell_objects):
+        _place_multi_cell_object(cells, occupied_cells, rows, cols, rng)
     if person_attributes is None:
         person_attributes = assign_attributes(list(placement.keys()), rng)
     # objetos ya colocados en la celda PROPIA de alguien (object_on o
@@ -1018,6 +1086,7 @@ def generate_puzzle(
     max_attempts: int = 500,
     num_clues: int = 1,
     num_relational_people: int = 0,
+    num_multi_cell_objects: int = 0,
 ) -> Puzzle:
     """Genera un puzzle completo con solucion unica y asesino identificable.
 
@@ -1051,6 +1120,7 @@ def generate_puzzle(
             num_clues=num_clues,
             num_relational_people=num_relational_people,
             person_attributes=person_attributes,
+            num_multi_cell_objects=num_multi_cell_objects,
         )
 
         areas: dict[str, list[str]] = {}

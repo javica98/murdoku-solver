@@ -5,8 +5,10 @@ import pytest
 
 from murdoku.generator import (
     ATTRIBUTE_CATALOG,
+    MULTI_CELL_OBJECTS,
     NON_BLOCKING_OBJECTS,
     _extremal_position_candidates,
+    _place_multi_cell_object,
     assign_attributes,
     assign_clues_and_objects,
     find_all_solutions,
@@ -810,3 +812,92 @@ def test_generate_puzzle_rejects_victim_not_in_person_ids():
             scenario="Test",
             difficulty="easy",
         )
+
+
+def test_place_multi_cell_object_produces_correct_footprint_size():
+    rng = random.Random(0)
+    cells = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    obj = _place_multi_cell_object(cells, occupied_cells=set(), rows=6, cols=6, rng=rng)
+    assert obj in MULTI_CELL_OBJECTS
+    footprint = [cid for cid, c in cells.items() if obj in c.objects]
+    assert len(footprint) == MULTI_CELL_OBJECTS[obj]
+
+
+def test_place_multi_cell_object_stays_within_a_single_room():
+    rng = random.Random(1)
+    cells = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    obj = _place_multi_cell_object(cells, occupied_cells=set(), rows=6, cols=6, rng=rng)
+    footprint = [cid for cid, c in cells.items() if obj in c.objects]
+    areas = {cells[cid].area for cid in footprint}
+    assert len(areas) == 1
+
+
+def test_place_multi_cell_object_footprint_is_contiguous():
+    rng = random.Random(2)
+    cells = generate_rooms(7, 7, ["A", "B", "C", "D"], rng=rng)
+    obj = _place_multi_cell_object(cells, occupied_cells=set(), rows=7, cols=7, rng=rng)
+    footprint = {cid for cid, c in cells.items() if obj in c.objects}
+    assert _is_connected(footprint)
+
+
+def test_place_multi_cell_object_marks_footprint_as_blocked():
+    rng = random.Random(3)
+    cells = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    obj = _place_multi_cell_object(cells, occupied_cells=set(), rows=6, cols=6, rng=rng)
+    footprint = [cid for cid, c in cells.items() if obj in c.objects]
+    assert all(cells[cid].blocked for cid in footprint)
+
+
+def test_place_multi_cell_object_never_overlaps_occupied_cells():
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    for seed in range(20):
+        rng = random.Random(f"multicell-occupied-{seed}")
+        cells = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        placement = generate_placement(6, 6, people, rng=rng)
+        occupied = set(placement.values())
+        obj = _place_multi_cell_object(cells, occupied, 6, 6, rng)
+        if obj is None:
+            continue
+        footprint = {cid for cid, c in cells.items() if obj in c.objects}
+        assert footprint.isdisjoint(occupied), f"seed={seed}"
+
+
+def test_place_multi_cell_object_returns_none_when_nothing_fits():
+    # tablero de una sola celda: no cabe ningun objeto de tamaño >= 2.
+    cells = {"r0c0": Cell(area="A")}
+    obj = _place_multi_cell_object(cells, occupied_cells=set(), rows=1, cols=1, rng=random.Random(0))
+    assert obj is None
+    assert cells["r0c0"].objects == []
+
+
+@pytest.mark.parametrize("seed", range(15))
+def test_generated_puzzle_with_multi_cell_object_is_fully_valid(seed):
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    puzzle = generate_puzzle(
+        6, 6, people, victim_id="Francisco", area_names=["A", "B", "C"],
+        scenario="Test", difficulty="medium", rng=random.Random(f"multicell-puzzle-{seed}"),
+        num_clues=2, num_relational_people=2, num_multi_cell_objects=1,
+    )
+    solution = puzzle.solution
+
+    assert check_unique_rows_and_cols(solution) == []
+    assert check_no_blocked_cells(puzzle, solution) == []
+    assert check_clues_satisfied(puzzle, solution) == []
+    assert identify_murderer(puzzle, solution) is not None
+    assert has_unique_solution(puzzle)
+
+
+def test_multi_cell_object_actually_appears_across_many_seeds():
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    seen = False
+    for seed in range(15):
+        puzzle = generate_puzzle(
+            6, 6, people, victim_id="Francisco", area_names=["A", "B", "C"],
+            scenario="Test", difficulty="medium", rng=random.Random(f"multicell-coverage-{seed}"),
+            num_clues=2, num_relational_people=2, num_multi_cell_objects=1,
+        )
+        for cell in puzzle.cells.values():
+            if any(obj in MULTI_CELL_OBJECTS for obj in cell.objects):
+                seen = True
+                break
+    assert seen
