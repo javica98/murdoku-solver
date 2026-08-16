@@ -1173,10 +1173,12 @@ def generate_puzzle(
 # asesino identificable en un tiempo razonable (sub-segundo por intento)
 # en los 4 tramos, incluido 9x9 con pistas relacionales de verdad.
 DIFFICULTY_TIERS = {
-    "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 2, "num_relational_people": 2},
-    "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2, "num_relational_people": 2},
-    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 4, "num_relational_people": 3},
-    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 4, "num_relational_people": 3},
+    "easy": {"rows": 4, "cols": 4, "num_areas": 2, "num_clues": 2, "num_relational_people": 2, "num_multi_cell_objects": 0},
+    "medium": {"rows": 6, "cols": 6, "num_areas": 3, "num_clues": 2, "num_relational_people": 2, "num_multi_cell_objects": 0},
+    # twists (objetos multi-celda) solo en los tramos dificiles, tal y
+    # como los planteaba el roadmap desde el principio.
+    "hard": {"rows": 8, "cols": 8, "num_areas": 4, "num_clues": 4, "num_relational_people": 3, "num_multi_cell_objects": 1},
+    "expert": {"rows": 9, "cols": 9, "num_areas": 5, "num_clues": 4, "num_relational_people": 3, "num_multi_cell_objects": 1},
 }
 
 
@@ -1213,4 +1215,5 @@ def generate_puzzle_for_difficulty(
         max_attempts=max_attempts,
         num_clues=tier["num_clues"],
         num_relational_people=tier["num_relational_people"],
+        num_multi_cell_objects=tier["num_multi_cell_objects"],
     )
