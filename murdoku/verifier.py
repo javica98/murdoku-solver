@@ -317,6 +317,25 @@ def evaluate_clue_positive(
 
         raise ValueError(f"unsupported relational_attribute relation: {relation!r}")
 
+    if clue_type == "extremal_position":
+        # unica por direccion: nadie mas comparte fila ni columna, asi
+        # que el minimo/maximo de cada eje lo tiene EXACTAMENTE una
+        # persona.
+        direction = structured.get("direction")
+        if not solution:
+            return False
+
+        if direction in ("north", "south"):
+            rows = [parse_cell_id(cid)[0] for cid in solution.values()]
+            target = min(rows) if direction == "north" else max(rows)
+            return row == target
+        if direction in ("east", "west"):
+            cols = [parse_cell_id(cid)[1] for cid in solution.values()]
+            target = min(cols) if direction == "west" else max(cols)
+            return col == target
+
+        raise ValueError(f"unsupported extremal_position direction: {direction!r}")
+
     if clue_type == "relative_to_person":
         reference_id = structured.get("reference")
         direction = structured.get("direction")

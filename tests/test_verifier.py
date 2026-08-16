@@ -551,6 +551,52 @@ def test_unsupported_room_parity_value_raises():
         check_clues_satisfied(puzzle, puzzle.solution)
 
 
+def _puzzle_for_extremal_position_tests(structured: dict) -> Puzzle:
+    # 3x3, sin salas. Ada en r0c0 (fila/columna minimas), Bruno en r1c2
+    # (columna maxima), Carmen en r2c1 (fila maxima).
+    cells = {f"r{row}c{col}": Cell(area=None) for row in range(3) for col in range(3)}
+    return Puzzle(
+        id="extremal_position_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=3, cols=3),
+        areas={},
+        cells=cells,
+        people=[
+            Person(id="Ada", role="suspect", clue=Clue(text="...", structured=structured)),
+            Person(id="Bruno", role="suspect", clue=Clue(text="...")),
+            Person(id="Carmen", role="victim"),
+        ],
+        solution={"Ada": "r0c0", "Bruno": "r1c2", "Carmen": "r2c1"},
+    )
+
+
+def test_extremal_position_north_holds_for_the_minimum_row():
+    puzzle = _puzzle_for_extremal_position_tests({"type": "extremal_position", "direction": "north"})
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_extremal_position_south_fails_for_a_person_not_in_the_maximum_row():
+    puzzle = _puzzle_for_extremal_position_tests({"type": "extremal_position", "direction": "south"})
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_extremal_position_west_holds_for_the_minimum_column():
+    puzzle = _puzzle_for_extremal_position_tests({"type": "extremal_position", "direction": "west"})
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_extremal_position_east_fails_for_a_person_not_in_the_maximum_column():
+    puzzle = _puzzle_for_extremal_position_tests({"type": "extremal_position", "direction": "east"})
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_unsupported_extremal_position_direction_raises():
+    puzzle = _puzzle_for_extremal_position_tests({"type": "extremal_position", "direction": "up"})
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, puzzle.solution)
+
+
 def _puzzle_for_attribute_tests(structured: dict, roommate_attributes: dict) -> Puzzle:
     # ROOM = r0c0 (Bastian), r0c1 (Roommate). HALL = r0c2 (Vlad).
     return Puzzle(

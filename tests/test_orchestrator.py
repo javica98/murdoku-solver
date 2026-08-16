@@ -55,6 +55,12 @@ def test_same_axis_clue_is_simple():
     assert _is_simple_clue({"type": "same_axis", "object": "alfombra", "axis": "row"}) is True
 
 
+def test_extremal_position_clue_is_not_simple():
+    # depende de donde acabe TODO el mundo (el minimo/maximo de toda la
+    # colocacion), no solo de la celda propia.
+    assert _is_simple_clue({"type": "extremal_position", "direction": "north"}) is False
+
+
 def test_negated_clue_is_not_simple_even_if_row_local():
     assert _is_simple_clue({"type": "area", "area": "ROOM", "negate": True}) is False
 

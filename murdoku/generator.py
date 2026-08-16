@@ -334,6 +334,36 @@ def _make_room_parity_clause(
     return {"type": "room_parity", "parity": "even" if occupants % 2 == 0 else "odd"}
 
 
+def _extremal_position_candidates(cell_id: str, placement: dict[str, str]) -> list[str]:
+    """Direcciones en las que esta celda es la mas extrema de TODA la
+    colocacion -- unica por direccion, ya que nadie comparte fila ni
+    columna con nadie mas.
+    """
+    row, col = parse_cell_id(cell_id)
+    rows = [parse_cell_id(cid)[0] for cid in placement.values()]
+    cols = [parse_cell_id(cid)[1] for cid in placement.values()]
+
+    candidates = []
+    if row == min(rows):
+        candidates.append("north")
+    if row == max(rows):
+        candidates.append("south")
+    if col == min(cols):
+        candidates.append("west")
+    if col == max(cols):
+        candidates.append("east")
+    return candidates
+
+
+def _make_extremal_position_clause(
+    cell_id: str, placement: dict[str, str], rng: random.Random
+) -> dict | None:
+    candidates = _extremal_position_candidates(cell_id, placement)
+    if not candidates:
+        return None
+    return {"type": "extremal_position", "direction": rng.choice(candidates)}
+
+
 def _people_sharing_area(
     person_id: str, area: str, cells: dict[str, Cell], placement: dict[str, str]
 ) -> list[str]:
@@ -491,6 +521,8 @@ def _available_global_types(
     if cell.area is not None:
         types.append("room_count")
         types.append("room_parity")
+    if _extremal_position_candidates(cell_id, placement):
+        types.append("extremal_position")
     if len(placement) > 1:
         # cualquier otra persona sirve de referencia (norte/sur/este/oeste,
         # no solo "al sur de alguien mas arriba" como antes).
@@ -652,6 +684,9 @@ def assign_clues_and_objects(
             elif clue_type == "room_parity":
                 clause = _make_room_parity_clause(person_id, cell.area, cells, placement)
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "extremal_position":
+                clause = _make_extremal_position_clause(cell_id, placement, rng)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
 
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
@@ -765,6 +800,9 @@ def render_clue_template(structured: dict) -> str:
     if clue_type == "room_parity":
         parity_word = "par" if structured["parity"] == "even" else "impar"
         return f"El numero de personas en su sala era {parity_word}."
+
+    if clue_type == "extremal_position":
+        return f"Era la persona mas al {_DIRECTION_LABELS[structured['direction']]} de todos."
 
     raise ValueError(f"no hay plantilla para el tipo de pista: {clue_type!r}")
 

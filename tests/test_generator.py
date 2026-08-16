@@ -6,6 +6,7 @@ import pytest
 from murdoku.generator import (
     ATTRIBUTE_CATALOG,
     NON_BLOCKING_OBJECTS,
+    _extremal_position_candidates,
     assign_attributes,
     assign_clues_and_objects,
     find_all_solutions,
@@ -452,6 +453,56 @@ def test_same_axis_never_anchors_to_a_duplicated_object():
             assert len(cells_with_obj) == 1, f"seed={seed}: {obj} appears in {len(cells_with_obj)} cells"
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_extremal_position_clue_holds(seed):
+    rng = random.Random(f"extremal-position-{seed}")
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+        person_attributes=person_attributes,
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
+
+    assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
+
+
+def test_extremal_position_appears_across_many_seeds():
+    seen_types = set()
+    for seed in range(30):
+        rng = random.Random(f"extremal-position-coverage-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        person_attributes = assign_attributes(people, rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+            person_attributes=person_attributes,
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            seen_types.update(c["type"] for c in clauses)
+    assert "extremal_position" in seen_types
+
+
+def test_extremal_position_never_offered_to_more_than_four_people():
+    # es unica por direccion (nadie comparte fila ni columna), asi que
+    # como mucho 4 personas por puzzle pueden llegar a tenerla disponible
+    # (min fila, max fila, min columna, max columna).
+    for seed in range(20):
+        rng = random.Random(f"extremal-position-rarity-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        eligible = [
+            person_id
+            for person_id, cell_id in placement.items()
+            if _extremal_position_candidates(cell_id, placement)
+        ]
+        assert len(eligible) <= 4, f"seed={seed}: {eligible}"
+
+
 def test_render_clue_template_for_relational_attribute_none_with():
     text = render_clue_template(
         {"type": "relational_attribute", "attribute": "color_pelo", "value": "moreno", "relation": "none_with"}
@@ -526,6 +577,11 @@ def test_render_clue_template_for_same_axis_row():
 def test_render_clue_template_for_same_axis_col():
     text = render_clue_template({"type": "same_axis", "object": "mesa", "axis": "col"})
     assert text == "Estaba en la misma columna que la mesa."
+
+
+def test_render_clue_template_for_extremal_position():
+    text = render_clue_template({"type": "extremal_position", "direction": "north"})
+    assert text == "Era la persona mas al norte de todos."
 
 
 def test_object_on_clues_use_only_non_blocking_objects():
