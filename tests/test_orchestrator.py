@@ -32,6 +32,16 @@ def test_relational_clue_is_not_simple():
     assert _is_simple_clue({"type": "relative_to_person", "reference": "P0", "relation": "same_row"}) is False
 
 
+def test_room_count_clue_is_not_simple():
+    # depende de cuanta gente mas acabe en la misma sala -- no se sabe
+    # hasta tener la colocacion completa.
+    assert _is_simple_clue({"type": "room_count", "relation": "exact", "count": 2}) is False
+
+
+def test_room_parity_clue_is_not_simple():
+    assert _is_simple_clue({"type": "room_parity", "parity": "even"}) is False
+
+
 def test_relative_to_object_clue_is_simple():
     # ancla a un objeto ya colocado (geometria fija), no a otra persona --
     # se puede evaluar solo con la celda propia, como area/object_on.

@@ -264,6 +264,33 @@ def evaluate_clue_positive(
 
         raise ValueError(f"unsupported relational_person relation: {relation!r}")
 
+    if clue_type == "room_count":
+        if cell.area is None:
+            return False
+        occupants = len(people_in_area(puzzle, solution, cell.area))
+        relation = structured.get("relation")
+        count = structured.get("count")
+
+        if relation == "exact":
+            return occupants == count
+        if relation == "at_least":
+            return occupants >= count
+
+        raise ValueError(f"unsupported room_count relation: {relation!r}")
+
+    if clue_type == "room_parity":
+        if cell.area is None:
+            return False
+        occupants = len(people_in_area(puzzle, solution, cell.area))
+        parity = structured.get("parity")
+
+        if parity == "even":
+            return occupants % 2 == 0
+        if parity == "odd":
+            return occupants % 2 == 1
+
+        raise ValueError(f"unsupported room_parity value: {parity!r}")
+
     if clue_type == "relational_attribute":
         relation = structured.get("relation")
         attribute = structured.get("attribute")

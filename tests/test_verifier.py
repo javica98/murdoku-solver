@@ -487,6 +487,70 @@ def test_unsupported_relational_person_relation_raises():
         check_clues_satisfied(puzzle, solution)
 
 
+def _puzzle_for_room_count_tests(structured: dict) -> Puzzle:
+    # ROOM = r0c0 (Bastian), r0c1 (Roommate) -- 2 ocupantes. HALL = r0c2 (Vlad) -- 1.
+    return Puzzle(
+        id="room_count_test",
+        scenario="test",
+        difficulty="easy",
+        grid=Grid(rows=1, cols=3),
+        areas={"ROOM": ["r0c0", "r0c1"], "HALL": ["r0c2"]},
+        cells={
+            "r0c0": Cell(area="ROOM"),
+            "r0c1": Cell(area="ROOM"),
+            "r0c2": Cell(area="HALL"),
+        },
+        people=[
+            Person(id="Bastian", role="suspect", clue=Clue(text="...", structured=structured)),
+            Person(id="Roommate", role="suspect", clue=Clue(text="...")),
+            Person(id="Vlad", role="victim"),
+        ],
+        solution={"Bastian": "r0c0", "Roommate": "r0c1", "Vlad": "r0c2"},
+    )
+
+
+def test_room_count_exact_holds_with_matching_occupants():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_count", "relation": "exact", "count": 2})
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_room_count_exact_fails_with_wrong_occupants():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_count", "relation": "exact", "count": 3})
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_room_count_at_least_holds_below_the_actual_count():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_count", "relation": "at_least", "count": 1})
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_room_count_at_least_fails_above_the_actual_count():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_count", "relation": "at_least", "count": 5})
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_unsupported_room_count_relation_raises():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_count", "relation": "fewer_than", "count": 1})
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, puzzle.solution)
+
+
+def test_room_parity_even_holds_with_two_occupants():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_parity", "parity": "even"})
+    assert check_clues_satisfied(puzzle, puzzle.solution) == []
+
+
+def test_room_parity_odd_fails_with_two_occupants():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_parity", "parity": "odd"})
+    assert len(check_clues_satisfied(puzzle, puzzle.solution)) == 1
+
+
+def test_unsupported_room_parity_value_raises():
+    puzzle = _puzzle_for_room_count_tests({"type": "room_parity", "parity": "prime"})
+    with pytest.raises(ValueError):
+        check_clues_satisfied(puzzle, puzzle.solution)
+
+
 def _puzzle_for_attribute_tests(structured: dict, roommate_attributes: dict) -> Puzzle:
     # ROOM = r0c0 (Bastian), r0c1 (Roommate). HALL = r0c2 (Vlad).
     return Puzzle(

@@ -305,6 +305,35 @@ def _make_relational_attribute_clause(
     }
 
 
+def _room_occupant_count(
+    person_id: str, area: str, cells: dict[str, Cell], placement: dict[str, str]
+) -> int:
+    """Cuantas personas hay en `area`, contando a la propia persona --
+    "habia N personas en mi sala" incluye al testigo que lo dice.
+    """
+    return len(_people_sharing_area(person_id, area, cells, placement)) + 1
+
+
+def _make_room_count_clause(
+    person_id: str, area: str | None, cells: dict[str, Cell], placement: dict[str, str], rng: random.Random
+) -> dict | None:
+    if area is None:
+        return None
+    occupants = _room_occupant_count(person_id, area, cells, placement)
+    relation = rng.choice(["exact", "at_least"])
+    count = occupants if relation == "exact" else rng.randint(1, occupants)
+    return {"type": "room_count", "relation": relation, "count": count}
+
+
+def _make_room_parity_clause(
+    person_id: str, area: str | None, cells: dict[str, Cell], placement: dict[str, str]
+) -> dict | None:
+    if area is None:
+        return None
+    occupants = _room_occupant_count(person_id, area, cells, placement)
+    return {"type": "room_parity", "parity": "even" if occupants % 2 == 0 else "odd"}
+
+
 def _people_sharing_area(
     person_id: str, area: str, cells: dict[str, Cell], placement: dict[str, str]
 ) -> list[str]:
@@ -425,6 +454,9 @@ def _available_global_types(
     if others_in_area:
         types.append("with_person")
         types.append("relational_attribute")
+    if cell.area is not None:
+        types.append("room_count")
+        types.append("room_parity")
     if len(placement) > 1:
         # cualquier otra persona sirve de referencia (norte/sur/este/oeste,
         # no solo "al sur de alguien mas arriba" como antes).
@@ -572,6 +604,12 @@ def assign_clues_and_objects(
                     person_id, cell.area, cells, placement, person_attributes, rng
                 )
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "room_count":
+                clause = _make_room_count_clause(person_id, cell.area, cells, placement, rng)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
+            elif clue_type == "room_parity":
+                clause = _make_room_parity_clause(person_id, cell.area, cells, placement)
+                clauses.append(clause if clause is not None else _make_area_clause(cell))
 
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
@@ -669,6 +707,17 @@ def render_clue_template(structured: dict) -> str:
         descriptor = ATTRIBUTE_CATALOG[attribute][value]
         subject = "Nadie mas" if structured["relation"] == "none_with" else "Alguien mas"
         return f"{subject} en su sala {descriptor}."
+
+    if clue_type == "room_count":
+        count = structured["count"]
+        unit = "persona" if count == 1 else "personas"
+        if structured["relation"] == "exact":
+            return f"Habia exactamente {count} {unit} en su sala."
+        return f"Habia al menos {count} {unit} en su sala."
+
+    if clue_type == "room_parity":
+        parity_word = "par" if structured["parity"] == "even" else "impar"
+        return f"El numero de personas en su sala era {parity_word}."
 
     raise ValueError(f"no hay plantilla para el tipo de pista: {clue_type!r}")
 

@@ -365,6 +365,41 @@ def test_relative_to_object_never_anchors_to_a_duplicated_object():
             assert len(cells_with_obj) == 1, f"seed={seed}: {obj} appears in {len(cells_with_obj)} cells"
 
 
+@pytest.mark.parametrize("seed", range(30))
+def test_room_count_and_parity_clues_hold(seed):
+    rng = random.Random(f"room-count-{seed}")
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    placement = generate_placement(6, 6, people, rng=rng)
+    rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+    person_attributes = assign_attributes(people, rng)
+    cells, clues = assign_clues_and_objects(
+        placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+        person_attributes=person_attributes,
+    )
+    puzzle = _build_puzzle(6, 6, cells, placement, clues, person_attributes)
+
+    assert check_clues_satisfied(puzzle, placement) == [], f"seed={seed}"
+
+
+def test_room_count_and_room_parity_both_appear_across_many_seeds():
+    seen_types = set()
+    for seed in range(30):
+        rng = random.Random(f"room-count-coverage-{seed}")
+        people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        person_attributes = assign_attributes(people, rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6,
+            person_attributes=person_attributes,
+        )
+        for structured in clues.values():
+            clauses = structured.get("clauses", [structured])
+            seen_types.update(c["type"] for c in clauses)
+    assert "room_count" in seen_types
+    assert "room_parity" in seen_types
+
+
 def test_render_clue_template_for_relational_attribute_none_with():
     text = render_clue_template(
         {"type": "relational_attribute", "attribute": "color_pelo", "value": "moreno", "relation": "none_with"}
@@ -404,6 +439,31 @@ def test_render_clue_template_for_relative_to_object():
         {"type": "relative_to_object", "object": "alfombra", "direction": "west", "distance": 2}
     )
     assert text == "Estaba 2 columnas al oeste de la alfombra."
+
+
+def test_render_clue_template_for_room_count_exact_singular():
+    text = render_clue_template({"type": "room_count", "relation": "exact", "count": 1})
+    assert text == "Habia exactamente 1 persona en su sala."
+
+
+def test_render_clue_template_for_room_count_exact_plural():
+    text = render_clue_template({"type": "room_count", "relation": "exact", "count": 3})
+    assert text == "Habia exactamente 3 personas en su sala."
+
+
+def test_render_clue_template_for_room_count_at_least():
+    text = render_clue_template({"type": "room_count", "relation": "at_least", "count": 2})
+    assert text == "Habia al menos 2 personas en su sala."
+
+
+def test_render_clue_template_for_room_parity_even():
+    text = render_clue_template({"type": "room_parity", "parity": "even"})
+    assert text == "El numero de personas en su sala era par."
+
+
+def test_render_clue_template_for_room_parity_odd():
+    text = render_clue_template({"type": "room_parity", "parity": "odd"})
+    assert text == "El numero de personas en su sala era impar."
 
 
 def test_object_on_clues_use_only_non_blocking_objects():
