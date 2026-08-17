@@ -127,6 +127,17 @@ ALL_OBJECTS = BLOCKING_OBJECTS + NON_BLOCKING_OBJECTS
 # celdas), solo aparecen si toca colocarlos como twist de dificultad.
 MULTI_CELL_OBJECTS: dict[str, int] = {"elefante": 4, "sofa": 2}
 
+# Genero gramatical de cada objeto conocido, para elegir "un"/"una" en las
+# plantillas de pista -- casi todos los originales son femeninos, pero
+# elefante/sofa son masculinos, y el retema por LLM (ver murdoku/reskin.py)
+# puede introducir cualquier genero. Las clausulas guardan su propio
+# "gender" (ver _make_*_clause) en vez de que la plantilla lo adivine.
+OBJECT_GENDER: dict[str, str] = {
+    "estanteria": "f", "mesa": "f", "planta": "f",
+    "silla": "f", "alfombra": "f", "cama": "f",
+    "elefante": "m", "sofa": "m",
+}
+
 
 def _place_multi_cell_object(
     cells: dict[str, Cell],
@@ -237,7 +248,7 @@ def _make_object_on_clause(
         return None
     obj = rng.choice(candidates)
     cell.objects.append(obj)
-    return {"type": "object_on", "object": obj}
+    return {"type": "object_on", "object": obj, "gender": OBJECT_GENDER.get(obj, "f")}
 
 
 def _make_object_adjacent_clause(
@@ -266,7 +277,7 @@ def _make_object_adjacent_clause(
     neighbor.objects.append(obj)
     if obj in BLOCKING_OBJECTS:
         neighbor.blocked = True
-    return {"type": "object_adjacent", "object": obj}
+    return {"type": "object_adjacent", "object": obj, "gender": OBJECT_GENDER.get(obj, "f")}
 
 
 def _make_absolute_position_clause(
@@ -316,9 +327,11 @@ def _make_negated_object_adjacent_clause(
     if not false_candidates:
         return None
 
+    obj = rng.choice(false_candidates)
     return {
         "type": "object_adjacent",
-        "object": rng.choice(false_candidates),
+        "object": obj,
+        "gender": OBJECT_GENDER.get(obj, "f"),
         "negate": True,
     }
 
@@ -337,7 +350,7 @@ def _make_unique_object_on_clause(
 
     obj = rng.choice(candidates)
     cell.objects.append(obj)
-    return {"type": "unique_object_on", "object": obj}
+    return {"type": "unique_object_on", "object": obj, "gender": OBJECT_GENDER.get(obj, "f")}
 
 
 def _make_relational_attribute_clause(
@@ -502,7 +515,13 @@ def _make_relative_to_object_clause(
         return None
 
     obj, direction, distance = rng.choice(candidates)
-    return {"type": "relative_to_object", "object": obj, "direction": direction, "distance": distance}
+    return {
+        "type": "relative_to_object",
+        "object": obj,
+        "direction": direction,
+        "distance": distance,
+        "gender": OBJECT_GENDER.get(obj, "f"),
+    }
 
 
 def _same_axis_candidates(cell_id: str, cells: dict[str, Cell]) -> list[tuple[str, str]]:
@@ -536,7 +555,7 @@ def _make_same_axis_clause(cell_id: str, cells: dict[str, Cell], rng: random.Ran
         return None
 
     obj, axis = rng.choice(candidates)
-    return {"type": "same_axis", "object": obj, "axis": axis}
+    return {"type": "same_axis", "object": obj, "axis": axis, "gender": OBJECT_GENDER.get(obj, "f")}
 
 
 def _available_global_types(
@@ -778,6 +797,19 @@ def _distance_phrase(direction: str, distance: int) -> str:
     return f"{distance} {unit} al {_DIRECTION_LABELS[direction]}"
 
 
+def _indefinite_article(gender: str) -> str:
+    return "un" if gender == "m" else "una"
+
+
+def _definite_article(gender: str) -> str:
+    return "el" if gender == "m" else "la"
+
+
+def _de_article(gender: str) -> str:
+    """"de" + articulo, con la contraccion obligatoria "de el" -> "del"."""
+    return "del" if gender == "m" else "de la"
+
+
 def render_clue_template(structured: dict) -> str:
     """Redaccion fija en español a partir de una pista estructurada.
 
@@ -807,13 +839,16 @@ def render_clue_template(structured: dict) -> str:
         return f"Estaba en la sala {structured['area']}."
 
     if clue_type == "object_on":
-        return f"Estaba sobre una {structured['object']}."
+        article = _indefinite_article(structured.get("gender", "f"))
+        return f"Estaba sobre {article} {structured['object']}."
 
     if clue_type == "unique_object_on":
-        return f"Era la unica persona sobre una {structured['object']}."
+        article = _indefinite_article(structured.get("gender", "f"))
+        return f"Era la unica persona sobre {article} {structured['object']}."
 
     if clue_type == "object_adjacent":
-        return f"Estaba junto a una {structured['object']}."
+        article = _indefinite_article(structured.get("gender", "f"))
+        return f"Estaba junto a {article} {structured['object']}."
 
     if clue_type == "absolute_position":
         position = structured.get("position")
@@ -844,12 +879,14 @@ def render_clue_template(structured: dict) -> str:
         obj = structured["object"]
         direction = structured["direction"]
         distance = structured["distance"]
-        return f"Estaba {_distance_phrase(direction, distance)} de la {obj}."
+        de_article = _de_article(structured.get("gender", "f"))
+        return f"Estaba {_distance_phrase(direction, distance)} {de_article} {obj}."
 
     if clue_type == "same_axis":
         obj = structured["object"]
         axis_word = "fila" if structured["axis"] == "row" else "columna"
-        return f"Estaba en la misma {axis_word} que la {obj}."
+        article = _definite_article(structured.get("gender", "f"))
+        return f"Estaba en la misma {axis_word} que {article} {obj}."
 
     if clue_type == "relational_attribute":
         attribute = structured["attribute"]

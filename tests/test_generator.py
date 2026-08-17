@@ -7,6 +7,7 @@ from murdoku.generator import (
     ATTRIBUTE_CATALOG,
     MULTI_CELL_OBJECTS,
     NON_BLOCKING_OBJECTS,
+    OBJECT_GENDER,
     _extremal_position_candidates,
     _place_multi_cell_object,
     assign_attributes,
@@ -620,6 +621,37 @@ def test_render_clue_template_for_object_on():
 def test_render_clue_template_for_object_adjacent():
     text = render_clue_template({"type": "object_adjacent", "object": "mesa"})
     assert text == "Estaba junto a una mesa."
+
+
+def test_render_clue_template_uses_masculine_article_for_masculine_gender():
+    text = render_clue_template({"type": "object_adjacent", "object": "elefante", "gender": "m"})
+    assert text == "Estaba junto a un elefante."
+
+
+def test_render_clue_template_defaults_to_feminine_when_gender_is_missing():
+    # los puzzles reales transcritos a mano no llevan "gender" -- deben
+    # seguir leyendose igual que siempre (todos sus objetos eran femeninos).
+    text = render_clue_template({"type": "object_on", "object": "alfombra"})
+    assert text == "Estaba sobre una alfombra."
+
+
+def test_render_clue_template_for_relative_to_object_uses_del_contraction_for_masculine():
+    text = render_clue_template(
+        {"type": "relative_to_object", "object": "sofa", "direction": "west", "distance": 2, "gender": "m"}
+    )
+    assert text == "Estaba 2 columnas al oeste del sofa."
+
+
+def test_render_clue_template_for_same_axis_uses_masculine_definite_article():
+    text = render_clue_template({"type": "same_axis", "object": "sofa", "axis": "row", "gender": "m"})
+    assert text == "Estaba en la misma fila que el sofa."
+
+
+def test_multi_cell_object_gender_is_embedded_when_referenced_by_object_adjacent():
+    # elefante/sofa son masculinos -- verificacion de que el catalogo de
+    # genero los cubre (si no, el fallback "f" produciria "una elefante").
+    for obj in MULTI_CELL_OBJECTS:
+        assert OBJECT_GENDER.get(obj) == "m", obj
 
 
 def test_render_clue_template_rejects_unsupported_type():
