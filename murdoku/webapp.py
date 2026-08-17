@@ -220,6 +220,11 @@ def generar_form() -> str:
     body = f"""
     <form method="post" action="/generar">
       <div>
+        <label for="name">Nombre del caso (opcional)</label>
+        <input type="text" name="name" id="name" placeholder="p.ej. El misterio del vestuario">
+        <p class="hint">Si se deja en blanco, se llama "Caso generado".</p>
+      </div>
+      <div>
         <label for="difficulty">Dificultad</label>
         <select name="difficulty" id="difficulty">{options}</select>
       </div>
@@ -236,14 +241,17 @@ def generar_form() -> str:
 
 
 @app.post("/generar")
-def generar_submit(difficulty: str = Form(...), theme: str = Form("")) -> RedirectResponse:
+def generar_submit(
+    difficulty: str = Form(...), theme: str = Form(""), name: str = Form("")
+) -> RedirectResponse:
     if difficulty not in DIFFICULTY_TIERS:
         difficulty = "easy"
 
+    scenario = name.strip() or "Caso generado"
     rows = DIFFICULTY_TIERS[difficulty]["rows"]
     people = PEOPLE_NAMES[:rows]
     puzzle = generate_puzzle_for_difficulty(
-        difficulty, people, victim_id=people[-1], scenario="Caso generado"
+        difficulty, people, victim_id=people[-1], scenario=scenario
     )
 
     theme = theme.strip()
