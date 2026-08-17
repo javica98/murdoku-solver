@@ -13,5 +13,8 @@ wheels/
 # nunca se suben a un repo publico (ver roadmap, seccion 3).
 puzzles/local/
 
+# Niveles generados desde la webapp (datos de sesion, no codigo fuente).
+puzzles/generated/
+
 # Claves de API
 .env
