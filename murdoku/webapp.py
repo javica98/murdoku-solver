@@ -69,6 +69,25 @@ def _list_puzzle_records() -> list[dict]:
     return records
 
 
+def _delete_puzzle_record(puzzle_id: str) -> bool:
+    path = PUZZLES_DIR / f"{puzzle_id}.json"
+    if not path.exists():
+        return False
+    path.unlink()
+    return True
+
+
+def _rename_puzzle_record(puzzle_id: str, new_name: str) -> bool:
+    record = _load_puzzle_record(puzzle_id)
+    if record is None:
+        return False
+    record["puzzle"]["scenario"] = new_name
+    (PUZZLES_DIR / f"{puzzle_id}.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return True
+
+
 # ---------- estilo compartido entre Inicio / Listado / Generador ----------
 # (la vista de Jugar usa su propio HTML autocontenido via render_puzzle_html)
 
@@ -124,13 +143,30 @@ _BASE_CSS = """
   }
   .card-list { display: flex; flex-direction: column; gap: 0.7rem; }
   .card {
-    display: block; text-decoration: none; color: var(--ink); background: var(--paper-2);
-    border-radius: 6px; padding: 0.9rem 1.1rem; box-shadow: var(--shadow);
-    border: 2px solid transparent; transition: border-color 0.12s ease, transform 0.08s ease;
+    background: var(--paper-2); border-radius: 6px; padding: 0.9rem 1.1rem 0.7rem;
+    box-shadow: var(--shadow); border: 2px solid transparent;
+    transition: border-color 0.12s ease;
   }
-  .card:hover { border-color: var(--accent); transform: translateX(2px); }
+  .card:hover { border-color: var(--accent); }
+  .card-link {
+    display: block; text-decoration: none; color: var(--ink);
+    transition: transform 0.08s ease;
+  }
+  .card-link:hover { transform: translateX(2px); }
   .card .title { font-family: var(--font-mono); font-weight: 700; font-size: 0.95rem; margin: 0 0 0.2rem; }
   .card .meta { font-family: var(--font-mono); font-size: 0.7rem; color: var(--ink-dim); letter-spacing: 0.03em; }
+  .card-actions {
+    display: flex; gap: 0.6rem; margin-top: 0.7rem; padding-top: 0.6rem;
+    border-top: 1px solid var(--line);
+  }
+  .card-actions form { display: contents; }
+  .card-btn {
+    font-family: var(--font-mono); font-size: 0.66rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; text-decoration: none; background: none; border: none;
+    color: var(--ink-dim); cursor: pointer; padding: 0.2rem 0;
+  }
+  .card-btn:hover { color: var(--ink); text-decoration: underline; }
+  .card-btn.danger:hover { color: var(--accent); }
   .empty {
     font-family: var(--font-mono); font-size: 0.85rem; color: var(--ink-dim);
     padding: 2rem 1rem; text-align: center; border: 2px dashed var(--line); border-radius: 6px;
@@ -201,15 +237,57 @@ def listado_niveles() -> str:
             puzzle = record["puzzle"]
             theme = record.get("theme") or "clasico"
             difficulty_label = _DIFFICULTY_LABELS.get(puzzle["difficulty"], puzzle["difficulty"])
-            cards.append(
-                f'<a class="card" href="/jugar/{record["id"]}">'
-                f'<p class="title">{puzzle["scenario"]}</p>'
-                f'<p class="meta">{difficulty_label} &middot; tema: {theme} &middot; {record["created_at"]}</p>'
-                f"</a>"
-            )
+            cards.append(f"""
+            <div class="card">
+              <a class="card-link" href="/jugar/{record['id']}">
+                <p class="title">{puzzle['scenario']}</p>
+                <p class="meta">{difficulty_label} &middot; tema: {theme} &middot; {record['created_at']}</p>
+              </a>
+              <div class="card-actions">
+                <a class="card-btn" href="/niveles/{record['id']}/editar">Editar nombre</a>
+                <form method="post" action="/niveles/{record['id']}/borrar"
+                      onsubmit="return confirm('¿Borrar este nivel? No se puede deshacer.');">
+                  <button class="card-btn danger" type="submit">Borrar</button>
+                </form>
+              </div>
+            </div>
+            """)
         body = f'<div class="card-list">{"".join(cards)}</div>'
     body += '<a class="back-link" href="/">&larr; Inicio</a>'
     return _shell("Niveles generados", "Listado", body)
+
+
+@app.get("/niveles/{puzzle_id}/editar", response_class=HTMLResponse)
+def editar_nombre_form(puzzle_id: str) -> HTMLResponse:
+    record = _load_puzzle_record(puzzle_id)
+    if record is None:
+        return HTMLResponse(_shell("No encontrado", "Error", "<p>Ese nivel no existe.</p>"), status_code=404)
+
+    current_name = record["puzzle"]["scenario"]
+    body = f"""
+    <form method="post" action="/niveles/{puzzle_id}/editar">
+      <div>
+        <label for="name">Nombre del caso</label>
+        <input type="text" name="name" id="name" value="{current_name}" required>
+      </div>
+      <button class="submit" type="submit">Guardar</button>
+    </form>
+    <a class="back-link" href="/niveles">&larr; Cancelar</a>
+    """
+    return HTMLResponse(_shell("Editar nombre", "Nivel " + puzzle_id, body))
+
+
+@app.post("/niveles/{puzzle_id}/editar")
+def editar_nombre_submit(puzzle_id: str, name: str = Form(...)) -> RedirectResponse:
+    new_name = name.strip() or "Caso generado"
+    _rename_puzzle_record(puzzle_id, new_name)
+    return RedirectResponse(url="/niveles", status_code=303)
+
+
+@app.post("/niveles/{puzzle_id}/borrar")
+def borrar_nivel(puzzle_id: str) -> RedirectResponse:
+    _delete_puzzle_record(puzzle_id)
+    return RedirectResponse(url="/niveles", status_code=303)
 
 
 @app.get("/generar", response_class=HTMLResponse)
