@@ -1,3 +1,4 @@
+import json
 import random
 from unittest.mock import Mock
 
@@ -8,8 +9,10 @@ from murdoku.generator import (
     MULTI_CELL_OBJECTS,
     NON_BLOCKING_OBJECTS,
     OBJECT_GENDER,
+    _dedupe_clauses,
     _extremal_position_candidates,
     _place_multi_cell_object,
+    _remove_redundant_any_clauses,
     assign_attributes,
     assign_clues_and_objects,
     find_all_solutions,
@@ -933,3 +936,107 @@ def test_multi_cell_object_actually_appears_across_many_seeds():
                 seen = True
                 break
     assert seen
+
+
+def test_dedupe_clauses_removes_exact_duplicates_keeping_order():
+    clauses = [
+        {"type": "area", "area": "AREA_3"},
+        {"type": "object_on", "object": "silla"},
+        {"type": "area", "area": "AREA_3"},
+    ]
+    assert _dedupe_clauses(clauses) == [
+        {"type": "area", "area": "AREA_3"},
+        {"type": "object_on", "object": "silla"},
+    ]
+
+
+def test_dedupe_clauses_keeps_similar_but_distinct_clauses():
+    clauses = [
+        {"type": "area", "area": "AREA_0"},
+        {"type": "area", "area": "AREA_1"},
+    ]
+    assert _dedupe_clauses(clauses) == clauses
+
+
+def test_dedupe_clauses_on_an_empty_or_single_item_list():
+    assert _dedupe_clauses([]) == []
+    one = [{"type": "area", "area": "AREA_0"}]
+    assert _dedupe_clauses(one) == one
+
+
+def test_generated_puzzles_never_have_duplicate_clauses_in_the_same_clue():
+    # el bug real: cuando un tipo de pista falla y cae de vuelta a una
+    # pista de area generica, podia repetir una clausula que la persona
+    # ya tenia.
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    for seed in range(30):
+        rng = random.Random(f"dedupe-{seed}")
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        for person_id, structured in clues.items():
+            clauses = structured.get("clauses", [structured])
+            seen = set()
+            for clause in clauses:
+                key = json.dumps(clause, sort_keys=True)
+                assert key not in seen, f"seed={seed}: {person_id} has a duplicate clause {clause}"
+                seen.add(key)
+
+
+def test_remove_redundant_any_clauses_drops_any_matching_a_direct_assertion():
+    clauses = [
+        {"type": "area", "area": "AREA_1"},
+        {
+            "type": "any",
+            "clauses": [{"type": "area", "area": "AREA_1"}, {"type": "area", "area": "AREA_0"}],
+        },
+    ]
+    result = _remove_redundant_any_clauses(clauses)
+    assert result == [{"type": "area", "area": "AREA_1"}]
+
+
+def test_remove_redundant_any_clauses_keeps_any_with_no_matching_direct_assertion():
+    clauses = [
+        {"type": "object_on", "object": "silla"},
+        {
+            "type": "any",
+            "clauses": [{"type": "area", "area": "AREA_1"}, {"type": "area", "area": "AREA_0"}],
+        },
+    ]
+    assert _remove_redundant_any_clauses(clauses) == clauses
+
+
+def test_remove_redundant_any_clauses_ignores_negated_area_assertions():
+    # "No estaba en AREA_1" no confirma que SI este en AREA_1 -- el "any"
+    # no es redundante con una negacion.
+    clauses = [
+        {"type": "area", "area": "AREA_1", "negate": True},
+        {
+            "type": "any",
+            "clauses": [{"type": "area", "area": "AREA_1"}, {"type": "area", "area": "AREA_0"}],
+        },
+    ]
+    assert _remove_redundant_any_clauses(clauses) == clauses
+
+
+def test_generated_puzzles_never_have_a_redundant_any_next_to_a_direct_area():
+    people = ["Ada", "Bruno", "Carmen", "Diana", "Elena", "Francisco"]
+    for seed in range(30):
+        rng = random.Random(f"any-redundancy-{seed}")
+        placement = generate_placement(6, 6, people, rng=rng)
+        rooms = generate_rooms(6, 6, ["A", "B", "C"], rng=rng)
+        _, clues = assign_clues_and_objects(
+            placement, rooms, 6, 6, rng=rng, num_clues=4, num_relational_people=6
+        )
+        for person_id, structured in clues.items():
+            clauses = structured.get("clauses", [structured])
+            asserted = {c["area"] for c in clauses if c.get("type") == "area" and not c.get("negate")}
+            for clause in clauses:
+                if clause.get("type") != "any":
+                    continue
+                branch_areas = {
+                    c["area"] for c in clause.get("clauses", []) if c.get("type") == "area" and not c.get("negate")
+                }
+                assert not (branch_areas & asserted), f"seed={seed}: {person_id} has a redundant any"

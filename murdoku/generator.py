@@ -1,3 +1,4 @@
+import json
 import random
 
 from murdoku.schema import Cell, Clue, Grid, Person, Puzzle
@@ -611,6 +612,63 @@ def _available_global_types(
     return types
 
 
+def _dedupe_clauses(clauses: list[dict]) -> list[dict]:
+    """Quita clausulas EXACTAMENTE repetidas, conservando el orden de la
+    primera aparicion.
+
+    Pasa porque cuando un tipo de pista elegido no logra generar una
+    clausula valida, el codigo cae de vuelta a una pista de "area"
+    generica (ver los `clause if clause is not None else
+    _make_area_clause(cell)` de mas arriba) -- si esa misma area ya
+    estaba en la lista, sale duplicada tal cual. Quitar un duplicado
+    exacto nunca puede cambiar si el puzzle sigue siendo resoluble: un
+    "all" con una repeticion exige exactamente lo mismo que sin ella.
+    """
+    seen = set()
+    unique = []
+    for clause in clauses:
+        key = json.dumps(clause, sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(clause)
+    return unique
+
+
+def _remove_redundant_any_clauses(clauses: list[dict]) -> list[dict]:
+    """Quita una pista "any" de areas si una de sus ramas ya esta
+    afirmada DIRECTAMENTE (sin negar) por otra pista de la misma lista --
+    en ese caso el "o" no aporta nada nuevo ("en la sala X o en la sala
+    Y" es informacion vacia si ya sabemos con certeza que esta en X).
+
+    `_make_any_area_clause` siempre pone el area REAL de la persona como
+    primera rama y una sala señuelo como segunda, y cualquier otra
+    clausula "area" suelta en la lista de esa MISMA persona tambien es
+    siempre su area real (nunca un señuelo) -- asi que si coinciden, el
+    "any" es redundante con certeza, nunca por casualidad. Quitarlo no
+    cambia si el puzzle sigue siendo resoluble: la informacion que daba
+    ya estaba garantizada por la otra pista.
+    """
+    asserted_areas = {
+        clause["area"]
+        for clause in clauses
+        if clause.get("type") == "area" and not clause.get("negate")
+    }
+
+    kept = []
+    for clause in clauses:
+        if clause.get("type") == "any":
+            branch_areas = {
+                c["area"]
+                for c in clause.get("clauses", [])
+                if c.get("type") == "area" and not c.get("negate")
+            }
+            if branch_areas & asserted_areas:
+                continue
+        kept.append(clause)
+    return kept
+
+
 def assign_clues_and_objects(
     placement: dict[str, str],
     cells: dict[str, Cell],
@@ -775,6 +833,8 @@ def assign_clues_and_objects(
                 clause = _make_extremal_position_clause(cell_id, placement, rng)
                 clauses.append(clause if clause is not None else _make_area_clause(cell))
 
+        clauses = _dedupe_clauses(clauses)
+        clauses = _remove_redundant_any_clauses(clauses)
         clues[person_id] = clauses[0] if len(clauses) == 1 else {"type": "all", "clauses": clauses}
 
     return cells, clues
