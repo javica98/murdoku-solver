@@ -138,6 +138,7 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
         "murderer": murderer_id,
         "murderRoom": murder_room_label,
         "objectEmoji": puzzle.object_emoji,
+        "themeVocabulary": puzzle.theme_vocabulary,
     }
     puzzle_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
@@ -595,6 +596,38 @@ __ROOM_CLASSES__
 
   #verdict.good { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
   #verdict.bad { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+
+  .theme-vocab {
+    margin-top: 1.75rem;
+    padding-top: 1rem;
+    border-top: 1px dashed var(--line);
+  }
+
+  .theme-vocab summary {
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  .theme-vocab summary:hover { color: var(--ink); }
+
+  .theme-vocab-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    margin-top: 0.8rem;
+  }
+
+  .theme-vocab-item {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+  }
+
+  .theme-vocab-item b { color: var(--ink); font-weight: 700; }
 </style>
 
 <div class="case">
@@ -642,6 +675,11 @@ __ROOM_CLASSES__
       <div id="verdict"></div>
     </section>
   </div>
+
+  <details class="theme-vocab" id="theme-vocab" hidden>
+    <summary>Vocabulario del caso</summary>
+    <div class="theme-vocab-list" id="theme-vocab-list"></div>
+  </details>
 </div>
 
 <script>
@@ -976,8 +1014,24 @@ __ROOM_CLASSES__
   document.getElementById("mode-note-btn").addEventListener("click", () => setMode("note"));
   document.getElementById("mode-forbid-btn").addEventListener("click", () => setMode("forbid"));
 
+  function renderThemeVocabulary() {
+    const entries = Object.entries(PUZZLE.themeVocabulary || {});
+    if (!entries.length) return;
+    const details = document.getElementById("theme-vocab");
+    const list = document.getElementById("theme-vocab-list");
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    entries.forEach(([original, themed]) => {
+      const item = document.createElement("span");
+      item.className = "theme-vocab-item";
+      item.innerHTML = original + " &rarr; <b>" + themed + "</b>";
+      list.appendChild(item);
+    });
+    details.hidden = false;
+  }
+
   renderGrid();
   renderWitnesses();
+  renderThemeVocabulary();
   setMode("place");
 })();
 </script>

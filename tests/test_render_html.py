@@ -170,6 +170,21 @@ def test_render_handles_a_puzzle_with_no_object_emoji():
     assert '"objectEmoji": {}' in html
 
 
+def test_render_embeds_the_theme_vocabulary():
+    puzzle = _playable_puzzle()
+    puzzle.theme_vocabulary = {"copa": "cáliz", "Ada": "Nova"}
+    html = render_puzzle_html(puzzle)
+    assert '"themeVocabulary"' in html
+    assert '"copa": "cáliz"' in html
+    assert '"Ada": "Nova"' in html
+    assert 'id="theme-vocab"' in html
+
+
+def test_render_handles_a_puzzle_with_no_theme_vocabulary():
+    html = render_puzzle_html(_playable_puzzle())
+    assert '"themeVocabulary": {}' in html
+
+
 def test_render_includes_note_mode_controls():
     html = render_puzzle_html(_playable_puzzle())
     assert 'id="mode-place-btn"' in html

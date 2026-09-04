@@ -54,3 +54,9 @@ class Puzzle(BaseModel):
     # puzzles reales transcritos a mano y los mas antiguos simplemente no
     # muestran emoji, no es un campo obligatorio.
     object_emoji: dict[str, str] = {}
+    # nombre generico original -> nombre tematico, para TODO lo que se
+    # haya retemado (objetos, salas, personajes). Vacio si el puzzle
+    # nunca paso por reskin_puzzle. Solo es para mostrarle al jugador que
+    # se tradujo -- el resto del puzzle ya usa los nombres tematicos
+    # directamente, esto no hace falta para resolverlo.
+    theme_vocabulary: dict[str, str] = {}
