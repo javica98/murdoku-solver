@@ -139,6 +139,16 @@ OBJECT_GENDER: dict[str, str] = {
     "elefante": "m", "sofa": "m",
 }
 
+# Emoji mas parecido a cada objeto generico, para la vista jugable. Si un
+# puzzle se retema (ver murdoku/reskin.py), estas entradas se sustituyen
+# por las que elija el LLM para el nombre tematico -- este catalogo es
+# solo el punto de partida para el reparto de objetos "de fabrica".
+OBJECT_EMOJI: dict[str, str] = {
+    "estanteria": "📚", "mesa": "🍽️", "planta": "🪴",
+    "silla": "🪑", "alfombra": "🟫", "cama": "🛏️",
+    "elefante": "🐘", "sofa": "🛋️",
+}
+
 
 def _place_multi_cell_object(
     cells: dict[str, Cell],
@@ -1250,6 +1260,7 @@ def generate_puzzle(
             cells=cells,
             people=people,
             solution=placement,
+            object_emoji=dict(OBJECT_EMOJI),
         )
 
         if identify_murderer(puzzle, placement) is None:

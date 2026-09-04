@@ -5,9 +5,11 @@ from unittest.mock import Mock
 import pytest
 
 from murdoku.generator import (
+    ALL_OBJECTS,
     ATTRIBUTE_CATALOG,
     MULTI_CELL_OBJECTS,
     NON_BLOCKING_OBJECTS,
+    OBJECT_EMOJI,
     OBJECT_GENDER,
     _dedupe_clauses,
     _extremal_position_candidates,
@@ -834,6 +836,16 @@ def test_generate_puzzle_is_reproducible_with_the_same_seed():
     puzzle_b = _generate(seed=17)
     assert puzzle_a.solution == puzzle_b.solution
     assert puzzle_a.cells == puzzle_b.cells
+
+
+def test_generated_puzzle_carries_an_emoji_for_every_known_object():
+    puzzle = _generate(seed=4)
+    assert puzzle.object_emoji == OBJECT_EMOJI
+
+
+def test_object_emoji_catalog_covers_every_object_the_generator_can_place():
+    for obj in [*ALL_OBJECTS, *MULTI_CELL_OBJECTS]:
+        assert obj in OBJECT_EMOJI, f"{obj} has no emoji mapped"
 
 
 def test_generate_puzzle_rejects_victim_not_in_person_ids():

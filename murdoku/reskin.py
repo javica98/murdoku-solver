@@ -9,27 +9,29 @@ equivalente tematico breve (1-3 palabras).
 
 Devuelve UNICAMENTE un objeto JSON PLANO donde cada CLAVE es EXACTAMENTE \
 uno de los nombres originales que recibes (la clave NO se traduce) y \
-cada VALOR es un objeto con dos campos: "nombre" (la traduccion \
-tematica) y "genero" ("m" o "f", el genero gramatical en español de esa \
-traduccion). Nunca devuelvas listas ni valores sueltos -- una entrada \
-por cada objeto Y por cada sala recibidos, ni una mas ni una menos.
+cada VALOR es un objeto con TRES campos: "nombre" (la traduccion \
+tematica), "genero" ("m" o "f", el genero gramatical en español de esa \
+traduccion) y "emoji" (UN SOLO emoji que represente visualmente esa \
+traduccion -- usa "" si de verdad no hay ninguno que encaje). Nunca \
+devuelvas listas ni valores sueltos -- una entrada por cada objeto Y \
+por cada sala recibidos, ni una mas ni una menos.
 
 Ejemplo -- si recibes:
 {"tema": "piratas", "objetos": ["silla", "cama"], "salas": ["AREA_0"]}
 
 Debes devolver EXACTAMENTE esta forma:
-{"silla": {"nombre": "barril", "genero": "m"}, "cama": {"nombre": "hamaca", "genero": "f"}, "AREA_0": {"nombre": "Cubierta del barco", "genero": "f"}}"""
+{"silla": {"nombre": "barril", "genero": "m", "emoji": "🛢️"}, "cama": {"nombre": "hamaca", "genero": "f", "emoji": "🏕️"}, "AREA_0": {"nombre": "Cubierta del barco", "genero": "f", "emoji": ""}}"""
 
 
 def get_theme_vocabulary(
     objects: list[str], areas: list[str], theme: str, client, model: str = "gpt-5.4-nano"
 ) -> dict[str, dict[str, str]]:
     """Le pide al modelo barato un mapeo objeto/sala generico -> {nombre,
-    genero} tematico, p.ej. tema "piratas": {"silla": {"nombre": "barril",
-    "genero": "m"}}. Si el modelo no devuelve JSON valido, se deja alguna
-    clave fuera, o el genero no es "m"/"f", esa clave concreta
-    simplemente no se retema (se queda con su nombre generico) en vez de
-    fallar todo el puzzle.
+    genero, emoji} tematico, p.ej. tema "piratas": {"silla": {"nombre":
+    "barril", "genero": "m", "emoji": "🛢️"}}. Si el modelo no devuelve
+    JSON valido, se deja alguna clave fuera, o el genero no es "m"/"f",
+    esa clave concreta simplemente no se retema (se queda con su nombre
+    generico) en vez de fallar todo el puzzle.
     """
     payload = json.dumps({"tema": theme, "objetos": objects, "salas": areas}, ensure_ascii=False)
     response = client.responses.create(
@@ -59,9 +61,14 @@ def get_theme_vocabulary(
             continue
         nombre = value.get("nombre")
         genero = value.get("genero")
+        emoji = value.get("emoji")
         if not isinstance(nombre, str) or not nombre:
             continue
-        vocabulary[key] = {"nombre": nombre, "genero": genero if genero in ("m", "f") else "f"}
+        vocabulary[key] = {
+            "nombre": nombre,
+            "genero": genero if genero in ("m", "f") else "f",
+            "emoji": emoji if isinstance(emoji, str) else "",
+        }
     return vocabulary
 
 
@@ -85,12 +92,12 @@ def _rethemed_structured(
 
 def apply_theme(puzzle: Puzzle, vocabulary: dict[str, dict[str, str]]) -> Puzzle:
     """Sustituye nombres genericos de objeto/sala por su equivalente
-    tematico en todo el puzzle (celdas, areas, y las pistas -- vuelve a
-    renderizar el texto de cada una a partir de su version ya retemada,
-    en vez de pedirle al LLM que reescriba frase a frase). El genero
-    tematico de cada objeto viaja con la pista para que las plantillas
-    ("un"/"una", "el"/"la") concuerden aunque el retema cambie el genero
-    gramatical original.
+    tematico en todo el puzzle (celdas, areas, pistas, y el emoji de cada
+    objeto) -- vuelve a renderizar el texto de cada pista a partir de su
+    version ya retemada, en vez de pedirle al LLM que reescriba frase a
+    frase. El genero tematico de cada objeto viaja con la pista para que
+    las plantillas ("un"/"una", "el"/"la") concuerden aunque el retema
+    cambie el genero gramatical original.
     """
     name_map = {key: value["nombre"] for key, value in vocabulary.items()}
     gender_map = {value["nombre"]: value["genero"] for value in vocabulary.values()}
@@ -107,6 +114,17 @@ def apply_theme(puzzle: Puzzle, vocabulary: dict[str, dict[str, str]]) -> Puzzle
 
     new_areas = {name_map.get(area, area): cell_ids for area, cell_ids in puzzle.areas.items()}
 
+    # solo las claves de object_emoji son objetos (las de area no viven
+    # ahi) -- asi distinguimos "silla" de "AREA_0" sin necesitar que el
+    # LLM etiquete cada entrada.
+    new_object_emoji = {}
+    for key, old_emoji in puzzle.object_emoji.items():
+        themed = vocabulary.get(key)
+        if themed is not None:
+            new_object_emoji[themed["nombre"]] = themed.get("emoji") or old_emoji
+        else:
+            new_object_emoji[key] = old_emoji
+
     new_people = []
     for person in puzzle.people:
         if person.clue is None or person.clue.structured is None:
@@ -119,7 +137,14 @@ def apply_theme(puzzle: Puzzle, vocabulary: dict[str, dict[str, str]]) -> Puzzle
             )
         )
 
-    return puzzle.model_copy(update={"cells": new_cells, "areas": new_areas, "people": new_people})
+    return puzzle.model_copy(
+        update={
+            "cells": new_cells,
+            "areas": new_areas,
+            "people": new_people,
+            "object_emoji": new_object_emoji,
+        }
+    )
 
 
 def reskin_puzzle(puzzle: Puzzle, theme: str, client, model: str = "gpt-5.4-nano") -> Puzzle:

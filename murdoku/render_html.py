@@ -137,6 +137,7 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
         "solution": puzzle.solution,
         "murderer": murderer_id,
         "murderRoom": murder_room_label,
+        "objectEmoji": puzzle.object_emoji,
     }
     puzzle_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
@@ -327,19 +328,35 @@ __ROOM_DARK_VARS__
     inset: 0;
     z-index: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 0.15rem;
     text-align: center;
     padding: 0.3rem;
+    pointer-events: none;
+  }
+
+  .cell .obj-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.1;
+  }
+
+  .cell .obj-emoji {
+    font-size: clamp(0.85rem, 3.4vw, 1.3rem);
+    opacity: 0.85;
+  }
+
+  .cell .obj-name {
     font-family: var(--font-mono);
     font-weight: 600;
-    font-size: clamp(0.56rem, 2.4vw, 0.9rem);
+    font-size: clamp(0.5rem, 2vw, 0.78rem);
     letter-spacing: 0.03em;
-    line-height: 1.15;
     text-transform: uppercase;
     color: currentColor;
     opacity: 0.55;
-    pointer-events: none;
     word-break: break-word;
   }
 
@@ -693,7 +710,22 @@ __ROOM_CLASSES__
         if (cell.objects.length) {
           const label = document.createElement("span");
           label.className = "obj-label";
-          label.textContent = cell.objects.join(" · ");
+          cell.objects.forEach((obj) => {
+            const item = document.createElement("span");
+            item.className = "obj-item";
+            const emoji = PUZZLE.objectEmoji[obj];
+            if (emoji) {
+              const emojiSpan = document.createElement("span");
+              emojiSpan.className = "obj-emoji";
+              emojiSpan.textContent = emoji;
+              item.appendChild(emojiSpan);
+            }
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "obj-name";
+            nameSpan.textContent = obj;
+            item.appendChild(nameSpan);
+            label.appendChild(item);
+          });
           div.appendChild(label);
         }
 

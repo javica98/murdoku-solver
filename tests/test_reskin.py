@@ -16,17 +16,22 @@ def _fake_client(response_text: str) -> Mock:
 
 def test_get_theme_vocabulary_parses_a_valid_json_response():
     client = _fake_client(
-        json.dumps({"planta": {"nombre": "pokebola", "genero": "f"}, "AREA_0": {"nombre": "Gimnasio", "genero": "m"}})
+        json.dumps(
+            {
+                "planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"},
+                "AREA_0": {"nombre": "Gimnasio", "genero": "m", "emoji": ""},
+            }
+        )
     )
     vocabulary = get_theme_vocabulary(["planta"], ["AREA_0"], "pokemon", client)
     assert vocabulary == {
-        "planta": {"nombre": "pokebola", "genero": "f"},
-        "AREA_0": {"nombre": "Gimnasio", "genero": "m"},
+        "planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"},
+        "AREA_0": {"nombre": "Gimnasio", "genero": "m", "emoji": ""},
     }
 
 
 def test_get_theme_vocabulary_calls_the_cheap_model_by_default():
-    client = _fake_client(json.dumps({"planta": {"nombre": "pokebola", "genero": "f"}}))
+    client = _fake_client(json.dumps({"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}}))
     get_theme_vocabulary(["planta"], [], "pokemon", client)
     _, kwargs = client.responses.create.call_args
     assert kwargs["model"] == "gpt-5.4-nano"
@@ -43,23 +48,32 @@ def test_get_theme_vocabulary_drops_keys_the_puzzle_never_asked_for():
     client = _fake_client(
         json.dumps(
             {
-                "planta": {"nombre": "pokebola", "genero": "f"},
-                "objeto_inventado": {"nombre": "algo", "genero": "m"},
+                "planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"},
+                "objeto_inventado": {"nombre": "algo", "genero": "m", "emoji": ""},
             }
         )
     )
     vocabulary = get_theme_vocabulary(["planta"], ["AREA_0"], "pokemon", client)
-    assert vocabulary == {"planta": {"nombre": "pokebola", "genero": "f"}}
+    assert vocabulary == {"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}}
 
 
 def test_get_theme_vocabulary_defaults_to_feminine_on_invalid_gender():
-    client = _fake_client(json.dumps({"planta": {"nombre": "pokebola", "genero": "neutro"}}))
+    client = _fake_client(json.dumps({"planta": {"nombre": "pokebola", "genero": "neutro", "emoji": "🔴"}}))
     vocabulary = get_theme_vocabulary(["planta"], [], "pokemon", client)
-    assert vocabulary == {"planta": {"nombre": "pokebola", "genero": "f"}}
+    assert vocabulary == {"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}}
+
+
+def test_get_theme_vocabulary_defaults_to_empty_emoji_when_missing_or_invalid():
+    client = _fake_client(
+        json.dumps({"planta": {"nombre": "pokebola", "genero": "f"}, "AREA_0": {"nombre": "Gimnasio", "genero": "m", "emoji": 7}})
+    )
+    vocabulary = get_theme_vocabulary(["planta"], ["AREA_0"], "pokemon", client)
+    assert vocabulary["planta"]["emoji"] == ""
+    assert vocabulary["AREA_0"]["emoji"] == ""
 
 
 def test_get_theme_vocabulary_skips_entries_with_no_usable_name():
-    client = _fake_client(json.dumps({"planta": {"genero": "f"}}))
+    client = _fake_client(json.dumps({"planta": {"genero": "f", "emoji": "🔴"}}))
     vocabulary = get_theme_vocabulary(["planta"], [], "pokemon", client)
     assert vocabulary == {}
 
@@ -129,18 +143,19 @@ def _themed_test_puzzle() -> Puzzle:
             Person(id="Bruno", role="victim"),
         ],
         solution={"Ada": "r0c1", "Bruno": "r1c0"},
+        object_emoji={"planta": "🪴"},
     )
 
 
 def test_apply_theme_renames_objects_in_cells():
     puzzle = _themed_test_puzzle()
-    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f"}})
+    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}})
     assert themed.cells["r0c0"].objects == ["pokebola"]
 
 
 def test_apply_theme_renames_area_keys():
     puzzle = _themed_test_puzzle()
-    themed = apply_theme(puzzle, {"AREA_0": {"nombre": "Gimnasio", "genero": "m"}})
+    themed = apply_theme(puzzle, {"AREA_0": {"nombre": "Gimnasio", "genero": "m", "emoji": ""}})
     assert "Gimnasio" in themed.areas
     assert "AREA_0" not in themed.areas
     assert themed.cells["r0c0"].area == "Gimnasio"
@@ -148,7 +163,7 @@ def test_apply_theme_renames_area_keys():
 
 def test_apply_theme_re_renders_clue_text_with_the_new_name():
     puzzle = _themed_test_puzzle()
-    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f"}})
+    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}})
     ada = next(p for p in themed.people if p.id == "Ada")
     assert ada.clue.text == "Estaba junto a una pokebola."
     assert ada.clue.structured["object"] == "pokebola"
@@ -159,7 +174,7 @@ def test_apply_theme_uses_the_themed_gender_for_the_article():
     # pirata) es masculina -- la plantilla debe decir "un baul", no
     # "una baul".
     puzzle = _themed_test_puzzle()
-    themed = apply_theme(puzzle, {"planta": {"nombre": "baul", "genero": "m"}})
+    themed = apply_theme(puzzle, {"planta": {"nombre": "baul", "genero": "m", "emoji": "🪙"}})
     ada = next(p for p in themed.people if p.id == "Ada")
     assert ada.clue.text == "Estaba junto a un baul."
     assert ada.clue.structured["gender"] == "m"
@@ -167,9 +182,28 @@ def test_apply_theme_uses_the_themed_gender_for_the_article():
 
 def test_apply_theme_does_not_touch_the_victim():
     puzzle = _themed_test_puzzle()
-    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f"}})
+    themed = apply_theme(puzzle, {"planta": {"nombre": "pokebola", "genero": "f", "emoji": "🔴"}})
     bruno = next(p for p in themed.people if p.id == "Bruno")
     assert bruno.clue is None
+
+
+def test_apply_theme_moves_the_emoji_to_the_new_object_name():
+    puzzle = _themed_test_puzzle()
+    themed = apply_theme(puzzle, {"planta": {"nombre": "baul", "genero": "m", "emoji": "🪙"}})
+    assert themed.object_emoji == {"baul": "🪙"}
+
+
+def test_apply_theme_keeps_the_original_emoji_when_the_model_gives_none():
+    puzzle = _themed_test_puzzle()
+    themed = apply_theme(puzzle, {"planta": {"nombre": "baul", "genero": "m", "emoji": ""}})
+    assert themed.object_emoji == {"baul": "🪴"}
+
+
+def test_apply_theme_keeps_untouched_objects_under_their_original_emoji():
+    # el vocabulario solo trae "AREA_0" -- "planta" nunca se retema.
+    puzzle = _themed_test_puzzle()
+    themed = apply_theme(puzzle, {"AREA_0": {"nombre": "Gimnasio", "genero": "m", "emoji": ""}})
+    assert themed.object_emoji == {"planta": "🪴"}
 
 
 def test_reskin_puzzle_end_to_end_with_a_mocked_client():
@@ -177,9 +211,9 @@ def test_reskin_puzzle_end_to_end_with_a_mocked_client():
     client = _fake_client(
         json.dumps(
             {
-                "planta": {"nombre": "baul", "genero": "m"},
-                "AREA_0": {"nombre": "Cubierta", "genero": "f"},
-                "AREA_1": {"nombre": "Camarote", "genero": "m"},
+                "planta": {"nombre": "baul", "genero": "m", "emoji": "🪙"},
+                "AREA_0": {"nombre": "Cubierta", "genero": "f", "emoji": ""},
+                "AREA_1": {"nombre": "Camarote", "genero": "m", "emoji": ""},
             }
         )
     )
@@ -188,6 +222,7 @@ def test_reskin_puzzle_end_to_end_with_a_mocked_client():
 
     assert themed.cells["r0c0"].objects == ["baul"]
     assert "Cubierta" in themed.areas
+    assert themed.object_emoji == {"baul": "🪙"}
     ada = next(p for p in themed.people if p.id == "Ada")
     assert ada.clue.text == "Estaba junto a un baul."
 

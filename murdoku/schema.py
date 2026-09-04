@@ -49,3 +49,8 @@ class Puzzle(BaseModel):
     # que lo resuelva un LLM); el verificador compara una solucion
     # propuesta aparte, no depende de este campo.
     solution: dict[str, CellId] | None = None
+    # nombre de objeto (el que este vigente ahora mismo -- generico o ya
+    # retemado) -> emoji para la vista jugable. Vacio por defecto: los
+    # puzzles reales transcritos a mano y los mas antiguos simplemente no
+    # muestran emoji, no es un campo obligatorio.
+    object_emoji: dict[str, str] = {}

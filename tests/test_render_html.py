@@ -26,6 +26,7 @@ def _playable_puzzle() -> Puzzle:
             Person(id="Bruno", role="victim"),
         ],
         solution={"Ada": "r1c0", "Bruno": "r1c1"},
+        object_emoji={"copa": "🍷"},
     )
 
 
@@ -152,6 +153,21 @@ def test_render_is_self_contained_html_fragment():
     assert "__PUZZLE_JSON__" not in html
     assert "__ROOM_LIGHT_VARS__" not in html
     assert "__ROOM_CLASSES__" not in html
+
+
+def test_render_embeds_the_object_emoji_map():
+    html = render_puzzle_html(_playable_puzzle())
+    assert '"objectEmoji"' in html
+    assert '"copa": "🍷"' in html
+
+
+def test_render_handles_a_puzzle_with_no_object_emoji():
+    # los puzzles reales transcritos a mano no traen object_emoji -- debe
+    # renderizar igual, solo sin iconos.
+    puzzle = _playable_puzzle()
+    puzzle.object_emoji = {}
+    html = render_puzzle_html(puzzle)
+    assert '"objectEmoji": {}' in html
 
 
 def test_render_includes_note_mode_controls():
