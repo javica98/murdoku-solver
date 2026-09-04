@@ -29,6 +29,12 @@ IMPORTANTE: cada traduccion debe ser UNICA -- nunca repitas el mismo \
 "nombre" para dos claves distintas, ni siquiera entre categorias \
 distintas (un objeto y un personaje no pueden acabar llamandose igual).
 
+Cada "nombre" debe tener una relacion clara y reconocible con el tema \
+recibido -- alguien familiarizado con el tema debe poder explicar por \
+que ese objeto/sala/personaje encaja. Si no se te ocurre una traduccion \
+que encaje de verdad, usa una version generica del tema (p.ej. "trofeo" \
+para futbol) antes que una palabra rara sin relacion aparente.
+
 Ejemplo -- si recibes:
 {"tema": "piratas", "objetos": ["silla", "cama"], "salas": ["AREA_0"], "personajes": ["Ada", "Bruno"]}
 
