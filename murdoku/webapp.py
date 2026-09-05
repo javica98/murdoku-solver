@@ -1,3 +1,4 @@
+import html
 import json
 import os
 import time
@@ -35,13 +36,14 @@ def _client() -> OpenAI:
 # ---------- almacenamiento de niveles generados ----------
 
 
-def _save_puzzle_record(puzzle: Puzzle, theme: str) -> str:
+def _save_puzzle_record(puzzle: Puzzle, theme: str, theme_failed: bool = False) -> str:
     puzzle_id = f"{int(time.time())}_{uuid.uuid4().hex[:6]}"
     PUZZLES_DIR.mkdir(parents=True, exist_ok=True)
     record = {
         "id": puzzle_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "theme": theme,
+        "theme_failed": theme_failed,
         "puzzle": puzzle.model_dump(),
     }
     (PUZZLES_DIR / f"{puzzle_id}.json").write_text(
@@ -196,12 +198,16 @@ _BASE_CSS = """
 
 
 def _shell(title: str, eyebrow: str, body: str) -> str:
-    return f"""<title>{title}</title>
+    # title/eyebrow son siempre texto plano (nunca markup) -- se escapan
+    # aqui para que ningun caller tenga que acordarse de hacerlo, ni
+    # aunque el valor venga de un nombre de caso o un id de la URL puestos
+    # por el usuario.
+    return f"""<title>{html.escape(title)}</title>
 <style>{_BASE_CSS}</style>
 <div class="page">
   <header class="masthead">
-    <p class="eyebrow">{eyebrow}</p>
-    <h1>{title}</h1>
+    <p class="eyebrow">{html.escape(eyebrow)}</p>
+    <h1>{html.escape(title)}</h1>
   </header>
   {body}
 </div>
@@ -236,12 +242,13 @@ def listado_niveles() -> str:
         for record in records:
             puzzle = record["puzzle"]
             theme = record.get("theme") or "clasico"
+            theme_note = " (no aplicado)" if record.get("theme_failed") else ""
             difficulty_label = _DIFFICULTY_LABELS.get(puzzle["difficulty"], puzzle["difficulty"])
             cards.append(f"""
             <div class="card">
               <a class="card-link" href="/jugar/{record['id']}">
-                <p class="title">{puzzle['scenario']}</p>
-                <p class="meta">{difficulty_label} &middot; tema: {theme} &middot; {record['created_at']}</p>
+                <p class="title">{html.escape(puzzle['scenario'])}</p>
+                <p class="meta">{difficulty_label} &middot; tema: {html.escape(theme)}{theme_note} &middot; {record['created_at']}</p>
               </a>
               <div class="card-actions">
                 <a class="card-btn" href="/niveles/{record['id']}/editar">Editar nombre</a>
@@ -268,7 +275,7 @@ def editar_nombre_form(puzzle_id: str) -> HTMLResponse:
     <form method="post" action="/niveles/{puzzle_id}/editar">
       <div>
         <label for="name">Nombre del caso</label>
-        <input type="text" name="name" id="name" value="{current_name}" required>
+        <input type="text" name="name" id="name" value="{html.escape(current_name)}" required>
       </div>
       <button class="submit" type="submit">Guardar</button>
     </form>
@@ -333,10 +340,15 @@ def generar_submit(
     )
 
     theme = theme.strip()
+    theme_failed = False
     if theme:
         puzzle = reskin_puzzle(puzzle, theme, _client())
+        # reskin_puzzle cae de vuelta al puzzle generico (theme_vocabulary
+        # vacio) si ningun intento paso la verificacion -- eso es lo que
+        # distingue "no se pidio tema" de "se pidio pero fallo".
+        theme_failed = not puzzle.theme_vocabulary
 
-    puzzle_id = _save_puzzle_record(puzzle, theme)
+    puzzle_id = _save_puzzle_record(puzzle, theme, theme_failed)
     return RedirectResponse(url=f"/jugar/{puzzle_id}", status_code=303)
 
 
@@ -347,5 +359,5 @@ def jugar(puzzle_id: str) -> HTMLResponse:
         return HTMLResponse(_shell("No encontrado", "Error", "<p>Ese nivel no existe.</p>"), status_code=404)
 
     puzzle = Puzzle.model_validate(record["puzzle"])
-    html = render_puzzle_html(puzzle)
-    return HTMLResponse(html)
+    page = render_puzzle_html(puzzle, theme_failed=record.get("theme_failed", False))
+    return HTMLResponse(page)
