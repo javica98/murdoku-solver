@@ -185,6 +185,29 @@ def test_render_handles_a_puzzle_with_no_theme_vocabulary():
     assert '"themeVocabulary": {}' in html
 
 
+def test_render_shows_a_warning_when_theme_failed():
+    html = render_puzzle_html(_playable_puzzle(), theme_failed=True)
+    assert "No se pudo aplicar la tematica" in html
+
+
+def test_render_shows_no_warning_by_default():
+    html = render_puzzle_html(_playable_puzzle())
+    assert "No se pudo aplicar la tematica" not in html
+    assert '<p class="theme-warning">' not in html
+
+
+def test_render_builds_witness_cards_via_textcontent_not_innerhtml():
+    # antes, el id y la pista de cada testigo se montaban concatenando un
+    # string y asignandolo con innerHTML -- un id tematizado por LLM que
+    # contuviera markup se ejecutaria en el navegador del jugador. Ahora
+    # se construyen con textContent, que nunca interpreta el valor como
+    # HTML.
+    html = render_puzzle_html(_playable_puzzle())
+    assert "nameSpan.textContent = person.id;" in html
+    assert "statement.textContent" in html
+    assert "card.innerHTML =" not in html
+
+
 def test_render_includes_note_mode_controls():
     html = render_puzzle_html(_playable_puzzle())
     assert 'id="mode-place-btn"' in html

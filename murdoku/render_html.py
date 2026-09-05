@@ -84,7 +84,7 @@ def _room_css_classes() -> str:
     )
 
 
-def render_puzzle_html(puzzle: Puzzle) -> str:
+def render_puzzle_html(puzzle: Puzzle, theme_failed: bool = False) -> str:
     """Genera una pagina HTML autocontenida y jugable: un plano de la sala
     con las areas coloreadas y los objetos marcados, mas una lista de
     testigos con su pista en lenguaje natural. Un humano coloca a cada
@@ -92,6 +92,12 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
 
     Requiere que el puzzle ya tenga solucion (el generador siempre la
     produce; un puzzle transcrito sin resolver no se puede jugar asi).
+
+    `theme_failed` muestra un aviso en la parte de arriba de la pagina --
+    para cuando se pidio una tematica pero reskin_puzzle no logro
+    aplicarla y este puzzle se sirve con los nombres genericos de
+    siempre (ver `_themed_puzzle_is_valid` en reskin.py). Sin esto, el
+    jugador veria un caso generico sin saber que su tema no se aplico.
     """
     if puzzle.solution is None:
         raise ValueError("render_puzzle_html necesita un puzzle con solucion conocida")
@@ -142,12 +148,21 @@ def render_puzzle_html(puzzle: Puzzle) -> str:
     }
     puzzle_json = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
+    theme_warning_html = (
+        '<p class="theme-warning">No se pudo aplicar la tematica elegida '
+        "(el modelo no genero nombres unicos validos) -- este caso se "
+        "muestra con los nombres genericos.</p>"
+        if theme_failed
+        else ""
+    )
+
     html = _HTML_TEMPLATE
     html = html.replace("__PAGE_TITLE__", f"{puzzle.scenario} — {puzzle.id}")
     html = html.replace("__PUZZLE_JSON__", puzzle_json)
     html = html.replace("__ROOM_LIGHT_VARS__", _room_css_vars(_ROOM_PALETTE_LIGHT, "    "))
     html = html.replace("__ROOM_DARK_VARS__", _room_css_vars(_ROOM_PALETTE_DARK, "      "))
     html = html.replace("__ROOM_CLASSES__", _room_css_classes())
+    html = html.replace("__THEME_WARNING__", theme_warning_html)
     return html
 
 
@@ -628,9 +643,20 @@ __ROOM_CLASSES__
   }
 
   .theme-vocab-item b { color: var(--ink); font-weight: 700; }
+
+  .theme-warning {
+    margin: 0 0 1.2rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    background: color-mix(in srgb, var(--bad) 16%, transparent);
+    color: var(--bad);
+  }
 </style>
 
 <div class="case">
+  __THEME_WARNING__
   <header class="masthead">
     <div>
       <p class="case-num" id="case-num"></p>
@@ -876,12 +902,21 @@ __ROOM_CLASSES__
       card.className = "witness";
       card.tabIndex = 0;
       card.dataset.person = person.id;
-      card.innerHTML =
-        '<div class="witness-head">' +
-          '<span class="witness-name">' + person.id + "</span>" +
-          '<span class="witness-loc"></span>' +
-        "</div>" +
-        '<div class="witness-statement">"' + person.clue + '"</div>';
+
+      const head = document.createElement("div");
+      head.className = "witness-head";
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "witness-name";
+      nameSpan.textContent = person.id;
+      const locSpan = document.createElement("span");
+      locSpan.className = "witness-loc";
+      head.append(nameSpan, locSpan);
+
+      const statement = document.createElement("div");
+      statement.className = "witness-statement";
+      statement.textContent = '"' + person.clue + '"';
+
+      card.append(head, statement);
       card.addEventListener("click", () => armPerson(person.id));
       witnessesEl.appendChild(card);
     });
