@@ -34,6 +34,14 @@ Abre `http://127.0.0.1:8420`. Desde ahi puedes generar un caso nuevo
 "piratas" o "la corte medieval"), verlo en el listado, y jugarlo
 colocando a cada sospechoso y a la victima en el tablero.
 
+En el listado tambien puedes renombrar o borrar un caso ya generado.
+En la vista de juego, cada objeto tematico se muestra con un emoji
+orientativo, y hay un panel plegable "Vocabulario del caso" con la
+traduccion generico -> tematico de todo lo que se reskineo. Si pediste
+una tematica y no se pudo aplicar (el LLM no logro un vocabulario sin
+colisiones), la pagina lo avisa con un banner en vez de servir el caso
+generico en silencio.
+
 Los niveles generados se guardan como JSON en `puzzles/generated/`
 (no se suben al repo, ver `.gitignore`).
 

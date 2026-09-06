@@ -1,7 +1,7 @@
 [project]
 name = "murdoku-solver"
 version = "0.1.0"
-description = "Add your description here"
+description = "Puzzle de logica tipo sudoku con pistas de un caso de asesinato, mas una webapp para generarlo, tematizarlo con un LLM y jugarlo."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
